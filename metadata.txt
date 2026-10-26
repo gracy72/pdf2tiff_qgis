@@ -1,0 +1,54 @@
+[general]
+name=PDF2TIFF – konwerter PDF do TIFF (bezstratny, GDAL)
+qgisMinimumVersion=3.22
+qgisMaximumVersion=4.99
+supportsQt6=True
+description=Konwertuje wszystkie pliki *.pdf z wybranego katalogu (opcjonalnie z podkatalogami) do plików *.tif przy pomocy gdal_translate: renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, więc jakość nie jest tracona. Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli odtworzenie 1:1. Dwa paski postępu (plik i całość), log na bieżąco, przycisk STOP. Dodatkowo algorytm w Panelu przetwarzania (modele, qgis_process). / Converts all *.pdf files in a folder (optionally with subfolders) to *.tif with gdal_translate: rendering at a chosen DPI, lossless DEFLATE compression. For raster PDFs 200 DPI is the native resolution (1:1). Two progress bars, live log, STOP button, plus a Processing algorithm for models and qgis_process.
+version=1.0.0
+author=Grzegorz Blachowicz
+email=g.blachowicz@gmail.com
+
+about=
+    === INSTRUKCJA (PL) ===
+    Wtyczka robi dokładnie to samo co program Laz_PDF_tiff (Lazarus/Free Pascal), tylko w QGIS.
+    1. Uruchomienie: ikona na pasku narzędzi albo menu Wtyczki → PDF -> TIFF.
+    2. "Katalog PDF" – katalog z plikami PDF do konwersji.
+    3. "Katalog TIFF" – gdzie zapisać pliki TIFF (puste = obok plików PDF).
+    4. "gdal_translate" – ścieżka do gdal_translate.exe (domyślnie wykrywana: instancja QGIS, PATH, C:\QGIS\bin, C:\OSGeo4W\bin, C:\Program Files\QGIS*).
+    5. "DPI" – 200 dla PDF rastrowych (bez utraty jakości).
+    6. Opcje: "Pomijaj istniejące TIFF", "Podkatalogi" (zachowuje strukturę katalogów).
+    7. START – górny pasek pokazuje bieżący plik, dolny postęp całości; log tekstowy niżej. STOP przerywa pracę (kończy bieżący proces GDAL).
+    Ustawienia pól są zapamiętywane w profilu QGIS.
+    Wywoływana komenda:
+      gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER "wejście.pdf" "wyjście.tif"
+    Algorytm w Panelu przetwarzania: "Konwertuj PDF do TIFF (bezstratnie)" (grupa Konwersja PDF) – można go użyć w modelach i w qgis_process.
+    Jak sprawdzić DPI PDF-a: gdalinfo "plik.pdf" (natywne DPI = szerokość_px / szerokość_strony_w_calach).
+    === USER GUIDE (EN) ===
+    The plugin does exactly what the Laz_PDF_tiff desktop program does, inside QGIS.
+    1. Start: toolbar icon or menu Plugins → PDF -> TIFF.
+    2. "Katalog PDF" – folder with PDF files.
+    3. "Katalog TIFF" – output folder (empty = next to the PDFs).
+    4. "gdal_translate" – path to gdal_translate.exe (auto-detected: current QGIS install, PATH, C:\QGIS\bin, C:\OSGeo4W\bin, C:\Program Files\QGIS*).
+    5. "DPI" – 200 for raster PDFs (no quality loss).
+    6. Options: "Pomijaj istniejące TIFF" (skip existing), "Podkatalogi" (keep folder structure).
+    7. START – the upper bar is the current file, the lower one the overall progress, text log below; STOP aborts (kills the running GDAL process).
+    Field values are remembered in the QGIS profile.
+    Command used:
+      gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER "input.pdf" "output.tif"
+    Processing algorithm: "Konwertuj PDF do TIFF (bezstratnie)" (group "Konwersja PDF") – usable in models and qgis_process.
+    Checking a PDF's DPI: gdalinfo "file.pdf" (native DPI = width_px / page_width_in_inches).
+
+repository=https://github.com/gracy72/pdf2tiff_qgis
+tracker=https://github.com/gracy72/pdf2tiff_qgis/issues
+homepage=https://github.com/gracy72/pdf2tiff_qgis
+category=Raster
+tags=pdf,tiff,geotiff,gdal,conversion,konwersja,raster,dpi,lossless,bezstratny
+icon=icon.png
+
+changelog=
+    1.0.0 - pierwsza wersja: okno jak w programie Laz_PDF_tiff (katalog PDF/TIFF, gdal_translate, DPI, pomijanie istniejących, podkatalogi, dwa paski postępu, log, STOP), algorytm Processing, wykrywanie gdal_translate, zapamiętywanie ustawień.
+    1.0.0 - first release: the same window as the Laz_PDF_tiff program (PDF/TIFF folders, gdal_translate path, DPI, skip existing, subfolders, two progress bars, log, STOP), Processing algorithm, gdal_translate auto-detection, remembered settings.
+
+experimental=False
+deprecated=False
+server=False
