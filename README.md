@@ -1,6 +1,7 @@
 # PDF2TIFF — konwerter PDF do TIFF (bezstratny, GDAL) dla QGIS
 
-Wtyczka  QGIS:
+Wtyczka QGIS będąca odpowiednikiem programu **`Laz_PDF_tiff`** (Lazarus / Free Pascal).
+Robi dokładnie to samo, z tym samym wywołaniem GDAL, ale działa wewnątrz QGIS:
 
 * konwertuje **wszystkie pliki `*.pdf`** z wybranego katalogu (opcjonalnie z podkatalogami) do `*.tif`,
 * renderuje PDF w zadanym **DPI** i zapisuje **GeoTIFF z kompresją bezstratną DEFLATE** — jakość nie jest tracona,
@@ -44,7 +45,7 @@ Natywne DPI = `szerokość_px / szerokość_strony_w_calach`.
 
 ### 1. Z pliku ZIP (najprościej)
 
-1. Pobierz `pdf2tiff_qgis.zip` (albo spakuj ten katalog).
+1. Pobierz `pdf2tiff_qgis.zip` z sekcji *Releases* (albo spakuj ten katalog).
 2. QGIS → **Wtyczki → Zarządzanie wtyczkami → Zainstaluj z pliku ZIP**.
 3. Zaznacz **„Włącz”**, ikona pojawi się na pasku narzędzi.
 
@@ -148,6 +149,16 @@ Funkcja zwraca słownik `{'udane':…, 'bledy':…, 'pominiete':…, 'pliki':…
 Testowane na QGIS 4.2 (Qt6, Windows): import wtyczki, okno, konwersja 200 DPI,
 zachowanie podkatalogów, algorytm Processing i skrypt — wszystko działa.
 
+## Publikacja w repozytorium QGIS (plugins.qgis.org)
+
+1. W `metadata.txt` popraw `author`, `email`, `repository`, `tracker`, `homepage` (są już ustawione
+   na `gracy72` — zmień, jeśli publikujesz z innego konta).
+2. Podnieś `version=` i dopisz wpis w `changelog=`.
+3. Spakuj **zawartość** tego katalogu (bez `tools/`, `.git`, `__pycache__`) tak, aby w archiwum
+   pliki leżały na najwyższym poziomie (`metadata.txt`, `__init__.py`, …).
+   Najprościej: `python tools/make_zip.py`.
+4. <https://plugins.qgis.org/plugins/> → zaloguj się → **Add plugin** → wgraj ZIP.
+5. Recenzent sprawdzi m.in. `metadata.txt`, obsługę `unload()`, brak zależności spoza QGIS.
 
 ## Licencja
 
@@ -156,4 +167,4 @@ repozytorium wtyczek QGIS. Szczegóły w pliku `LICENSE`.
 
 ## Autor
 
-Gracjan Blachowicz.
+Gracjan Blachowicz — wersja QGIS programu `Laz_PDF_tiff`.
