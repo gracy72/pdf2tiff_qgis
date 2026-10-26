@@ -29,13 +29,17 @@ WYWOLYWANA KOMENDA (identyczna jak w wersji Lazarus)
 
 Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczosc (1:1).
 Kompresja DEFLATE jest bezstratna, wiec jakosc nie jest tracona.
+
+Uwaga bezpieczenstwa: gdal_translate uruchamiany jest wylacznie przez QProcess
+z lista argumentow - bez powloki systemowej i bez modulu subprocess.
 """
 
 import glob
 import os
 import re
 import shutil
-import subprocess
+
+from qgis.PyQt.QtCore import QProcess
 
 from qgis.core import (
     QgsProcessingAlgorithm, QgsProcessingException, QgsProcessingParameterBoolean,
@@ -64,8 +68,6 @@ GDAL_GLOBS = [
 PROGRESS_RE = re.compile(r'(\d{1,3})\s*\.\.\.')
 SIZE_RE = re.compile(r'size is\s+(\d+)\s*,\s*(\d+)')
 
-CREATE_NO_WINDOW = 0x08000000
-
 try:
     _NUMBER_INTEGER = QgsProcessingParameterNumber.Integer
 except AttributeError:                              # QGIS 4 / PyQt6
@@ -79,6 +81,31 @@ except AttributeError:                              # QGIS 4 / PyQt6
     _FILE_FILE = QgsProcessingParameterFile.Behavior.File
 
 
+def _qenum(owner, name):
+    """Wartosc enum QProcess dzialajaca w PyQt5 i PyQt6."""
+    value = getattr(owner, name, None)
+    if value is not None:
+        return value
+    for scope_name in ('ProcessChannelMode', 'ProcessState', 'ExitStatus'):
+        scope = getattr(owner, scope_name, None)
+        if scope is not None and hasattr(scope, name):
+            return getattr(scope, name)
+    raise AttributeError('%s.%s' % (owner.__name__, name))
+
+
+_MERGED_CHANNELS = _qenum(QProcess, 'MergedChannels')
+_NORMAL_EXIT = _qenum(QProcess, 'NormalExit')
+
+
+def _qgis_prefix():
+    """Sciezka instalacji QGIS albo pusty tekst, gdy modul qgis jest niedostepny."""
+    try:
+        from qgis.core import QgsApplication
+    except ImportError:
+        return ''
+    return QgsApplication.prefixPath()
+
+
 def detect_gdal_translate():
     """Zwraca sciezke do gdal_translate (albo sama nazwe programu jako fallback)."""
     candidates = []
@@ -87,22 +114,18 @@ def detect_gdal_translate():
     if found:
         candidates.append(found)
 
-    try:
-        from qgis.core import QgsApplication
-        prefix = QgsApplication.prefixPath()
+    prefix = _qgis_prefix()
+    if prefix:
         candidates.append(os.path.join(prefix, 'bin', 'gdal_translate.exe'))
-        candidates.append(os.path.join(prefix, '..', '..', 'bin', 'gdal_translate.exe'))
-    except Exception:
-        pass
+        candidates.append(os.path.join(os.path.dirname(prefix), 'bin', 'gdal_translate.exe'))
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(prefix)),
+                                       'bin', 'gdal_translate.exe'))
 
     candidates.extend(GDAL_CANDIDATES)
 
     for path in candidates:
-        try:
-            if path and os.path.isfile(path):
-                return os.path.normpath(path)
-        except OSError:
-            continue
+        if path and os.path.isfile(path):
+            return os.path.normpath(path)
 
     for pattern in GDAL_GLOBS:
         hits = sorted(glob.glob(pattern), reverse=True)
@@ -122,11 +145,9 @@ def lista_pdf(katalog, podkatalogi=False):
                 if name.lower().endswith('.pdf'):
                     result.append(os.path.join(root, name))
     else:
-        try:
-            names = os.listdir(katalog)
-        except OSError:
+        if not os.path.isdir(katalog):
             return []
-        for name in names:
+        for name in os.listdir(katalog):
             path = os.path.join(katalog, name)
             if os.path.isfile(path) and name.lower().endswith('.pdf'):
                 result.append(path)
@@ -166,6 +187,24 @@ def argumenty_gdal(dpi, src, dst):
         '-co', 'BIGTIFF=IF_SAFER',
         src, dst,
     ]
+
+
+def uruchom_gdal(gdal, src, dst, dpi):
+    """Uruchamia gdal_translate przez QProcess i czeka na koniec.
+
+    Zwraca krotke (ok, kod_wyjscia, rozmiar, tekst_wyjscia).
+    """
+    proc = QProcess()
+    proc.setProcessChannelMode(_MERGED_CHANNELS)
+    proc.start(gdal, argumenty_gdal(dpi, src, dst))
+
+    if not proc.waitForStarted(20000):
+        return False, -1, '', 'Nie można uruchomić gdal_translate: %s' % gdal
+
+    proc.waitForFinished(-1)
+    tekst = bytes(proc.readAll()).decode('utf-8', 'replace')
+    kod = proc.exitCode() if proc.exitStatus() == _NORMAL_EXIT else -1
+    return (kod == 0 and os.path.isfile(dst)), kod, rozmiar_z_tekstu(tekst), tekst
 
 
 def parsuj_postep(tekst, ostatni=-1):
@@ -208,7 +247,6 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
     log('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
     log('Plików          : %d' % len(pliki))
 
-    kwargs = {'creationflags': CREATE_NO_WINDOW} if os.name == 'nt' else {}
     udane = bledy = pominiete = 0
 
     for index, src in enumerate(pliki, start=1):
@@ -227,27 +265,19 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
             bledy += 1
             continue
 
-        try:
-            proc = subprocess.run([gdal] + argumenty_gdal(dpi, src, dst),
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
-        except OSError as exc:
-            log('        BŁĄD: nie można uruchomić gdal_translate (%s)' % exc)
-            bledy += 1
-            continue
-
-        tekst = proc.stdout.decode('utf-8', 'replace') if proc.stdout else ''
-        if proc.returncode == 0 and os.path.isfile(dst):
+        ok, kod, rozmiar, tekst = uruchom_gdal(gdal, src, dst, dpi)
+        if ok:
             udane += 1
-            rozmiar = rozmiar_z_tekstu(tekst)
             if rozmiar:
                 log('        OK  (%s px, DPI %d, bezstratnie)' % (rozmiar, dpi))
             else:
                 log('        OK  (DPI %d, bezstratnie)' % dpi)
         else:
             bledy += 1
-            log('        BŁĄD (kod %d)' % proc.returncode)
-            for line in tekst.strip().splitlines()[-3:]:
-                log('        %s' % line)
+            log('        BŁĄD (kod %d)' % kod)
+            if tekst:
+                for line in tekst.strip().splitlines()[-3:]:
+                    log('        %s' % line)
 
     log('=== KONIEC: udane=%d, błędy=%d, pominięte=%d ===' % (udane, bledy, pominiete))
     return {'udane': udane, 'bledy': bledy, 'pominiete': pominiete, 'pliki': len(pliki)}
@@ -337,7 +367,6 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
         feedback.pushInfo('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
         feedback.pushInfo('Plików do konwersji: %d' % len(pliki))
 
-        kwargs = {'creationflags': CREATE_NO_WINDOW} if os.name == 'nt' else {}
         udane = bledy = 0
         total = len(pliki)
 
@@ -363,25 +392,16 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
                 feedback.reportError('Nie można utworzyć katalogu %s (%s)' % (dst_dir, exc), fatalError=False)
                 continue
 
-            try:
-                proc = subprocess.run([gdal] + argumenty_gdal(dpi, src, dst),
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
-            except OSError as exc:
-                bledy += 1
-                feedback.reportError('Nie można uruchomić gdal_translate (%s)' % exc, fatalError=False)
-                continue
-
-            tekst = proc.stdout.decode('utf-8', 'replace') if proc.stdout else ''
-            if proc.returncode == 0 and os.path.isfile(dst):
+            ok, kod, rozmiar, tekst = uruchom_gdal(gdal, src, dst, dpi)
+            if ok:
                 udane += 1
-                rozmiar = rozmiar_z_tekstu(tekst)
                 if rozmiar:
                     feedback.pushInfo('        OK  (%s px, DPI %d, bezstratnie)' % (rozmiar, dpi))
                 else:
                     feedback.pushInfo('        OK  (DPI %d, bezstratnie)' % dpi)
             else:
                 bledy += 1
-                feedback.pushInfo('        BŁĄD (kod %d)' % proc.returncode)
+                feedback.pushInfo('        BŁĄD (kod %d)' % kod)
                 if tekst:
                     tail = '\n'.join(tekst.strip().splitlines()[-5:])
                     feedback.reportError('gdal_translate: %s' % tail, fatalError=False)
