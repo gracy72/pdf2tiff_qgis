@@ -51,10 +51,9 @@ class PdfToTiffPlugin(object):
             self.action = None
 
         if self.provider is not None:
-            try:
-                QgsApplication.processingRegistry().removeProvider(self.provider)
-            except Exception:
-                pass
+            registry = QgsApplication.processingRegistry()
+            if registry is not None:
+                registry.removeProvider(self.provider)
             self.provider = None
 
         if self.dialog is not None:

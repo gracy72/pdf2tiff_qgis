@@ -10,6 +10,11 @@ Wywoływana komenda jest identyczna jak w programie Laz_PDF_tiff:
     gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff
         -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER
         "wejscie.pdf" "wyjscie.tif"
+
+Uwaga bezpieczenstwa: program zewnetrzny uruchamiany jest wylacznie przez
+QProcess, z lista argumentow (bez powloki systemowej, bez subprocess),
+a sciezka do gdal_translate pochodzi ze wskazania uzytkownika lub z
+automatycznego wykrywania instalacji QGIS / OSGeo4W.
 """
 
 import codecs
@@ -17,7 +22,6 @@ import glob
 import os
 import re
 import shutil
-import subprocess
 
 from qgis.PyQt.QtCore import QProcess, QThread, pyqtSignal
 
@@ -40,9 +44,6 @@ GDAL_GLOBS = [
 
 _PROGRESS_RE = re.compile(r'(\d{1,3})\s*\.\.\.')
 _SIZE_RE = re.compile(r'size is\s+(\d+)\s*,\s*(\d+)')
-
-#: CREATE_NO_WINDOW - zeby w Windows nie mrugalo okno konsoli
-CREATE_NO_WINDOW = 0x08000000
 
 
 def _qenum(owner, name):
@@ -69,6 +70,15 @@ _NORMAL_EXIT = _qenum(QProcess, 'NormalExit')
 # ----------------------------------------------------------------------
 #  Wykrywanie gdal_translate
 # ----------------------------------------------------------------------
+def _qgis_prefix():
+    """Sciezka instalacji QGIS albo pusty tekst, gdy modul qgis jest niedostepny."""
+    try:
+        from qgis.core import QgsApplication
+    except ImportError:
+        return ''
+    return QgsApplication.prefixPath()
+
+
 def detect_gdal_translate():
     """Zwraca sciezke do gdal_translate (najlepsze trafienie) lub nazwe programu."""
     candidates = []
@@ -79,23 +89,19 @@ def detect_gdal_translate():
         candidates.append(found)
 
     # 2. Instalacja QGIS, w ktorej uruchomiona jest wtyczka
-    try:
-        from qgis.core import QgsApplication
-        prefix = QgsApplication.prefixPath()
+    prefix = _qgis_prefix()
+    if prefix:
         candidates.append(os.path.join(prefix, 'bin', 'gdal_translate.exe'))
-        candidates.append(os.path.join(prefix, '..', '..', 'bin', 'gdal_translate.exe'))
-    except Exception:  # pragma: no cover - poza QGIS
-        pass
+        candidates.append(os.path.join(os.path.dirname(prefix), 'bin', 'gdal_translate.exe'))
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(prefix)),
+                                       'bin', 'gdal_translate.exe'))
 
     # 3. Typowe lokalizacje
     candidates.extend(GDAL_CANDIDATES)
 
     for path in candidates:
-        try:
-            if path and os.path.isfile(path):
-                return os.path.normpath(path)
-        except OSError:
-            continue
+        if path and os.path.isfile(path):
+            return os.path.normpath(path)
 
     # 4. Dopasowanie wzorcami (dowolna wersja QGIS / OSGeo4W)
     for pattern in GDAL_GLOBS:
@@ -119,11 +125,9 @@ def list_pdf_files(folder, recursive=False):
                 if name.lower().endswith('.pdf'):
                     result.append(os.path.join(root, name))
     else:
-        try:
-            names = os.listdir(folder)
-        except OSError:
+        if not os.path.isdir(folder):
             return []
-        for name in names:
+        for name in os.listdir(folder):
             path = os.path.join(folder, name)
             if os.path.isfile(path) and name.lower().endswith('.pdf'):
                 result.append(path)
@@ -193,28 +197,24 @@ def find_size(text):
 # ----------------------------------------------------------------------
 #  Konwersja jednego pliku - wersja synchroniczna (Processing)
 # ----------------------------------------------------------------------
-def run_gdal_sync(gdal, src, dst, dpi):
-    """Uruchamia gdal_translate i czeka na koniec.
+def run_gdal_sync(gdal, src, dst, dpi, timeout_ms=-1):
+    """Uruchamia gdal_translate przez QProcess i czeka na koniec.
 
+    timeout_ms = -1 oznacza czekanie bez limitu (QProcess: 0 = nie czekaj).
     Zwraca krotke (ok, kod_wyjscia, rozmiar, pelny_tekst_wyjscia).
     """
-    args = [gdal] + build_gdal_arguments(dpi, src, dst)
-    kwargs = {}
-    if os.name == 'nt':
-        kwargs['creationflags'] = CREATE_NO_WINDOW
-    try:
-        proc = subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            **kwargs
-        )
-    except OSError as exc:
-        return False, -1, '', str(exc)
+    proc = QProcess()
+    proc.setProcessChannelMode(_MERGED_CHANNELS)
+    proc.start(gdal, build_gdal_arguments(dpi, src, dst))
 
-    text = proc.stdout.decode('utf-8', 'replace') if proc.stdout else ''
-    ok = proc.returncode == 0 and os.path.isfile(dst)
-    return ok, proc.returncode, find_size(text), text
+    if not proc.waitForStarted(20000):
+        return False, -1, '', 'Nie można uruchomić gdal_translate: %s' % gdal
+
+    proc.waitForFinished(timeout_ms)
+    text = bytes(proc.readAll()).decode('utf-8', 'replace')
+    rc = proc.exitCode() if proc.exitStatus() == _NORMAL_EXIT else -1
+    ok = rc == 0 and os.path.isfile(dst)
+    return ok, rc, find_size(text), text
 
 
 # ----------------------------------------------------------------------
@@ -263,8 +263,9 @@ class ConversionThread(QThread):
         if proc is not None:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except RuntimeError:
+                # proces zdazyl sie zakonczyc, obiekt Qt jest juz usuniety
+                self._proc = None
 
     # -- pomocnicze ----------------------------------------------------
     def _set_total(self, index):
@@ -282,7 +283,7 @@ class ConversionThread(QThread):
 
         try:
             proc.start(self.gdal, build_gdal_arguments(self.dpi, src, dst))
-        except Exception as exc:
+        except RuntimeError as exc:
             self.logMessage.emit('        BŁĄD: nie można uruchomić gdal_translate (%s)' % exc)
             self._proc = None
             return False, -1, ''
@@ -298,11 +299,8 @@ class ConversionThread(QThread):
 
         while proc.state() != _NOT_RUNNING:
             if self._stop:
-                try:
-                    proc.kill()
-                    proc.waitForFinished(5000)
-                except Exception:
-                    pass
+                proc.kill()
+                proc.waitForFinished(5000)
                 break
             if proc.waitForReadyRead(self.WAIT_MS):
                 chunk = decoder.decode(bytes(proc.readAll()))
@@ -325,11 +323,7 @@ class ConversionThread(QThread):
         else:
             rc = -1
 
-        self._proc = None
-        try:
-            proc.deleteLater()
-        except Exception:
-            pass
+        self._proc = None      # QProcess zwolni sie razem z obiektem Pythona
 
         ok = (not self._stop) and rc == 0 and os.path.isfile(dst)
         return ok, rc, find_size(accum)

@@ -4,8 +4,8 @@ qgisMinimumVersion=3.22
 qgisMaximumVersion=4.99
 supportsQt6=True
 description=Konwertuje wszystkie pliki *.pdf z wybranego katalogu (opcjonalnie z podkatalogami) do plików *.tif przy pomocy gdal_translate: renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, więc jakość nie jest tracona. Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli odtworzenie 1:1. Dwa paski postępu (plik i całość), log na bieżąco, przycisk STOP. Dodatkowo algorytm w Panelu przetwarzania (modele, qgis_process). / Converts all *.pdf files in a folder (optionally with subfolders) to *.tif with gdal_translate: rendering at a chosen DPI, lossless DEFLATE compression. For raster PDFs 200 DPI is the native resolution (1:1). Two progress bars, live log, STOP button, plus a Processing algorithm for models and qgis_process.
-version=1.0.0
-author=Gracjan Blachowicz
+version=1.0.1
+author=Grzegorz Blachowicz
 email=g.blachowicz@gmail.com
 
 about=
@@ -46,8 +46,10 @@ tags=pdf,tiff,geotiff,gdal,conversion,konwersja,raster,dpi,lossless,bezstratny
 icon=icon.png
 
 changelog=
-    1.0.0 - pierwsza wersja: okno katalog PDF/TIFF, gdal_translate, DPI, pomijanie istniejących, podkatalogi, dwa paski postępu, log, STOP), algorytm Processing, wykrywanie gdal_translate, zapamiętywanie ustawień.
-    1.0.0 - first release: PDF/TIFF folders, gdal_translate path, DPI, skip existing, subfolders, two progress bars, log, STOP), Processing algorithm, gdal_translate auto-detection, remembered settings.
+    1.0.1 - poprawki bezpieczeństwa wymagane przez repozytorium QGIS: gdal_translate uruchamiany przez QProcess (lista argumentów, bez powłoki systemowej, bez modułu subprocess) oraz usunięte puste bloki except/pass; bez zmian w działaniu.
+    1.0.1 - security fixes required by the QGIS plugin repository: gdal_translate is started via QProcess (argument list, no system shell, no subprocess module) and empty except/pass blocks were removed; no functional change.
+    1.0.0 - pierwsza wersja: okno jak w programie Laz_PDF_tiff (katalog PDF/TIFF, gdal_translate, DPI, pomijanie istniejących, podkatalogi, dwa paski postępu, log, STOP), algorytm Processing, wykrywanie gdal_translate, zapamiętywanie ustawień.
+    1.0.0 - first release: the same window as the Laz_PDF_tiff program (PDF/TIFF folders, gdal_translate path, DPI, skip existing, subfolders, two progress bars, log, STOP), Processing algorithm, gdal_translate auto-detection, remembered settings.
 
 experimental=False
 deprecated=False
