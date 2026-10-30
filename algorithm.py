@@ -1,35 +1,59 @@
 # -*- coding: utf-8 -*-
 """
-Algorytm Processing: konwersja wszystkich plikow PDF z katalogu do TIFF.
+Algorytm Processing: konwersja plikow PDF z katalogu do TIFF.
 
 Dzieki temu konwersje mozna uruchamiac z Panelu przetwarzania, z modeli
 (Graphic Modeler) i z wiersza polecen qgis_process.
+
+Obslugiwane sa PDF wielostronicowe - wybor stron dziala tak samo jak w oknie
+wtyczki: tylko rysunki (domyslnie), wszystkie strony albo wskazana lista.
 """
 
 import os
 
 from qgis.core import (
     QgsProcessingAlgorithm, QgsProcessingException, QgsProcessingParameterBoolean,
-    QgsProcessingParameterFile, QgsProcessingParameterFolderDestination,
-    QgsProcessingParameterNumber, QgsProcessingProvider,
+    QgsProcessingParameterEnum, QgsProcessingParameterFile,
+    QgsProcessingParameterFolderDestination, QgsProcessingParameterNumber,
+    QgsProcessingParameterString, QgsProcessingProvider,
 )
 
 from .converter import (
-    build_dest_path, detect_gdal_translate, list_pdf_files, run_gdal_sync,
+    DEFAULT_MIN_FORMAT, DEFAULT_MIN_INK, PAGE_MODE_ALL, PAGE_MODE_CUSTOM,
+    PAGE_MODE_DRAWINGS, SHEET_NAMES, build_dest_path, convert_pdf_file,
+    detect_gdal_translate, list_pdf_files,
 )
 
-# Qt5/Qt6 i QGIS 3/QGIS 4 - numery typow parametrow roznia sie zapisem
-try:
-    _NUMBER_INTEGER = QgsProcessingParameterNumber.Integer
-except AttributeError:  # QGIS 4 / PyQt6
-    _NUMBER_INTEGER = QgsProcessingParameterNumber.Type.Integer
 
-try:
-    _FILE_FOLDER = QgsProcessingParameterFile.Folder
-    _FILE_FILE = QgsProcessingParameterFile.File
-except AttributeError:  # QGIS 4 / PyQt6
-    _FILE_FOLDER = QgsProcessingParameterFile.Behavior.Folder
-    _FILE_FILE = QgsProcessingParameterFile.Behavior.File
+def _enum_value(owner, scope_name, name):
+    """Wartosc enum parametru Processing niezalezna od wersji QGIS/PyQt.
+
+    QGIS 3 / PyQt5 : QgsProcessingParameterNumber.Integer
+    QGIS 4 / PyQt6 : QgsProcessingParameterNumber.Type.Integer
+    """
+    value = getattr(owner, name, None)
+    if value is not None:
+        return value
+    scope = getattr(owner, scope_name, None)
+    if scope is not None:
+        nested = getattr(scope, name, None)
+        if nested is not None:
+            return nested
+    raise AttributeError('%s.%s' % (getattr(owner, '__name__', owner), name))
+
+
+_NUMBER_INTEGER = _enum_value(QgsProcessingParameterNumber, 'Type', 'Integer')
+_NUMBER_DOUBLE = _enum_value(QgsProcessingParameterNumber, 'Type', 'Double')
+_FILE_FOLDER = _enum_value(QgsProcessingParameterFile, 'Behavior', 'Folder')
+_FILE_FILE = _enum_value(QgsProcessingParameterFile, 'Behavior', 'File')
+
+#: Etykiety trybow stron (kolejnosc = wartosci listy wyboru)
+PAGE_MODE_LABELS = [
+    'tylko rysunki (domyślnie)',
+    'wszystkie strony',
+    'wskazane strony',
+]
+PAGE_MODE_VALUES = [PAGE_MODE_DRAWINGS, PAGE_MODE_ALL, PAGE_MODE_CUSTOM]
 
 
 class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
@@ -38,6 +62,10 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
     INPUT_FOLDER = 'INPUT_FOLDER'
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
     DPI = 'DPI'
+    PAGE_MODE = 'PAGE_MODE'
+    PAGES = 'PAGES'
+    MIN_FORMAT = 'MIN_FORMAT'
+    MIN_INK = 'MIN_INK'
     SKIP_EXISTING = 'SKIP_EXISTING'
     RECURSIVE = 'RECURSIVE'
     GDAL_TRANSLATE = 'GDAL_TRANSLATE'
@@ -56,12 +84,17 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
 
     def shortHelpString(self):
         return (
-            'Konwertuje wszystkie pliki *.pdf z katalogu do plików *.tif przy pomocy '
+            'Konwertuje pliki *.pdf z katalogu do plików *.tif przy pomocy '
             'gdal_translate. Renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, '
             'więc jakość nie jest tracona.\n\n'
+            'PDF wielostronicowe: każda strona jest osobnym podzbiorem GDAL '
+            '("PDF:<numer>:<plik>"). Domyślnie zapisywane są tylko rysunki, czyli strony '
+            'większe niż wybrany format (A3 = większe niż A4) - opisówki A4 są pomijane. '
+            'Można też wybrać wszystkie strony albo listę stron (np. 1,3,5-8).\n\n'
+            'Nazwy plików: PDF jednostronicowy -> "nazwa.tif", PDF wielostronicowy -> '
+            '"nazwa_p01.tif", "nazwa_p02.tif", ...\n\n'
             'Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli '
-            'odtworzenie 1:1. Wyższe DPI (400/600) to już interpolacja - gładsze, ale bez '
-            'nowego detalu.\n\n'
+            'odtworzenie 1:1. Wyższe DPI (400/600) to już interpolacja.\n\n'
             'Wywoływana komenda:\n'
             'gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff '
             '-co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER '
@@ -79,6 +112,20 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterNumber(
             self.DPI, 'DPI renderowania (200 = natywne dla PDF rastrowych)',
             type=_NUMBER_INTEGER, defaultValue=200, minValue=72, maxValue=2400))
+        self.addParameter(QgsProcessingParameterEnum(
+            self.PAGE_MODE, 'Strony PDF', options=PAGE_MODE_LABELS,
+            defaultValue=0))
+        self.addParameter(QgsProcessingParameterString(
+            self.PAGES, 'Wskazane strony (np. 1,3,5-8; puste = wszystkie)',
+            defaultValue='', optional=True))
+        self.addParameter(QgsProcessingParameterEnum(
+            self.MIN_FORMAT, 'Minimalny format rysunku',
+            options=SHEET_NAMES,
+            defaultValue=SHEET_NAMES.index(DEFAULT_MIN_FORMAT.upper())))
+        self.addParameter(QgsProcessingParameterNumber(
+            self.MIN_INK, 'Minimalne pokrycie tuszem %% (0 = bez filtra)',
+            type=_NUMBER_DOUBLE, defaultValue=DEFAULT_MIN_INK,
+            minValue=0.0, maxValue=90.0))
         self.addParameter(QgsProcessingParameterBoolean(
             self.SKIP_EXISTING, 'Pomijaj istniejące TIFF', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(
@@ -106,6 +153,20 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
         skip_existing = self.parameterAsBool(parameters, self.SKIP_EXISTING, context)
         recursive = self.parameterAsBool(parameters, self.RECURSIVE, context)
 
+        mode_index = self.parameterAsEnum(parameters, self.PAGE_MODE, context)
+        if 0 <= mode_index < len(PAGE_MODE_VALUES):
+            page_mode = PAGE_MODE_VALUES[mode_index]
+        else:
+            page_mode = PAGE_MODE_DRAWINGS
+        page_spec = self.parameterAsString(parameters, self.PAGES, context).strip()
+
+        format_index = self.parameterAsEnum(parameters, self.MIN_FORMAT, context)
+        if 0 <= format_index < len(SHEET_NAMES):
+            min_format = SHEET_NAMES[format_index]
+        else:
+            min_format = DEFAULT_MIN_FORMAT
+        min_ink = self.parameterAsDouble(parameters, self.MIN_INK, context)
+
         files = list_pdf_files(in_dir, recursive)
         if not files:
             raise QgsProcessingException('W katalogu nie znaleziono plików *.pdf.')
@@ -114,10 +175,15 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
         feedback.pushInfo('Katalog źródłowy: %s' % in_dir)
         feedback.pushInfo('Katalog docelowy: %s' % out_dir)
         feedback.pushInfo('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
+        feedback.pushInfo('Tryb stron      : %s%s' % (
+            PAGE_MODE_LABELS[max(0, min(mode_index, len(PAGE_MODE_LABELS) - 1))],
+            '' if page_mode != PAGE_MODE_DRAWINGS else
+            ' (min. format %s, min. tusz %.1f%%)' % (min_format, min_ink)))
         feedback.pushInfo('Plików do konwersji: %d' % len(files))
 
         ok_count = 0
         fail_count = 0
+        skipped_count = 0
         total = len(files)
 
         for index, src in enumerate(files):
@@ -127,38 +193,28 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
 
             feedback.setProgress(int(index * 100.0 / total))
 
-            dst, dst_dir = build_dest_path(src, in_dir, out_dir, recursive)
-            feedback.pushInfo('[%d/%d] %s  ->  %s' % (
-                index + 1, total, os.path.basename(src), os.path.basename(dst)))
-
-            if skip_existing and os.path.isfile(dst):
-                feedback.pushInfo('        pominięto (plik TIFF już istnieje)')
-                ok_count += 1
-                continue
+            base_dst, dst_dir = build_dest_path(src, in_dir, out_dir, recursive)
+            feedback.pushInfo('[%d/%d] %s' % (index + 1, total, os.path.basename(src)))
 
             try:
                 os.makedirs(dst_dir, exist_ok=True)
             except OSError as exc:
                 fail_count += 1
-                feedback.reportError('Nie można utworzyć katalogu %s (%s)' % (dst_dir, exc), fatalError=False)
+                feedback.reportError('Nie można utworzyć katalogu %s (%s)' % (dst_dir, exc),
+                                     fatalError=False)
                 continue
 
-            success, rc, size_info, output = run_gdal_sync(gdal, src, dst, dpi)
-            if success:
-                ok_count += 1
-                if size_info:
-                    feedback.pushInfo('        OK  (%s px, DPI %d, bezstratnie)' % (size_info, dpi))
-                else:
-                    feedback.pushInfo('        OK  (DPI %d, bezstratnie)' % dpi)
-            else:
-                fail_count += 1
-                feedback.pushInfo('        BŁĄD (kod %d)' % rc)
-                if output:
-                    tail = '\n'.join(output.strip().splitlines()[-5:])
-                    feedback.reportError('gdal_translate: %s' % tail, fatalError=False)
+            ok, fail, skipped = convert_pdf_file(
+                gdal, src, base_dst, dpi,
+                page_mode, page_spec, min_format, min_ink,
+                skip_existing, feedback.pushInfo)
+            ok_count += ok
+            fail_count += fail
+            skipped_count += skipped
 
         feedback.setProgress(100)
-        feedback.pushInfo('=== KONIEC: udane=%d, błędy=%d ===' % (ok_count, fail_count))
+        feedback.pushInfo('=== KONIEC: udane strony=%d, błędy=%d, pominięte=%d ===' % (
+            ok_count, fail_count, skipped_count))
         return {self.OUTPUT_FOLDER: out_dir}
 
 
