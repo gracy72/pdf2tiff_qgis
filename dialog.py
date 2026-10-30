@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Okno konwertera PDF -> TIFF - odpowiednik formularza TForm1 z wersji Lazarus.
+Okno konwertera PDF -> TIFF.
 
-Uklad, etykiety i zachowanie sa takie same jak w programie Laz_PDF_tiff:
-katalog PDF, katalog TIFF, sciezka gdal_translate, DPI, opcje
+Katalog PDF, katalog TIFF, sciezka gdal_translate, DPI, opcje
 "Pomijaj istniejace TIFF" i "Podkatalogi", przyciski START/STOP,
 dwa paski postepu (plik i calosc) oraz log na biezaco.
 
