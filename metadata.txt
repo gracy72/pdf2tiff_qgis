@@ -3,39 +3,53 @@ name=PDF2TIFF - konwerter PDF do TIFF (bezstratny, GDAL)
 qgisMinimumVersion=3.22
 qgisMaximumVersion=4.99
 supportsQt6=True
-description=Konwertuje wszystkie pliki *.pdf z wybranego katalogu (opcjonalnie z podkatalogami) do plików *.tif przy pomocy gdal_translate: renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, więc jakość nie jest tracona. Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli odtworzenie 1:1. Dwa paski postępu (plik i całość), log na bieżąco, przycisk STOP. Dodatkowo algorytm w Panelu przetwarzania (modele, qgis_process). / Converts all *.pdf files in a folder (optionally with subfolders) to *.tif with gdal_translate: rendering at a chosen DPI, lossless DEFLATE compression. For raster PDFs 200 DPI is the native resolution (1:1). Two progress bars, live log, STOP button, plus a Processing algorithm for models and qgis_process.
-version=1.0.1
+description=Konwertuje wszystkie pliki *.pdf z wybranego katalogu (opcjonalnie z podkatalogami) do plików *.tif przy pomocy gdal_translate: renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, więc jakość nie jest tracona. Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli odtworzenie 1:1. PDF wielostronicowe: domyślnie zapisywane są tylko rysunki (strony większe niż wybrany format), do wyboru też wszystkie strony albo wskazana lista; nazwy to nazwa_p01.tif, nazwa_p02.tif... Dwa paski postępu (plik i całość), log na bieżąco, przycisk STOP. Dodatkowo algorytm w Panelu przetwarzania (modele, qgis_process). / Converts all *.pdf files in a folder (optionally with subfolders) to *.tif with gdal_translate: rendering at a chosen DPI, lossless DEFLATE compression. For raster PDFs 200 DPI is the native resolution (1:1). Multipage PDFs: by default only drawings are saved (pages larger than the chosen sheet format), with options for all pages or a page list; files are named name_p01.tif, name_p02.tif... Two progress bars, live log, STOP button, plus a Processing algorithm for models and qgis_process.
+version=1.1.0
 author=Gracjan Blachowicz
 email=g.blachowicz@gmail.com
 
 about=
     === INSTRUKCJA (PL) ===
-    Wtyczka robi dokładnie to samo co program Laz_PDF_tiff (Lazarus/Free Pascal), tylko w QGIS.
+    Wtyczka konwertuje pliki PDF do GeoTIFF bezstratnie, przez gdal_translate.
     1. Uruchomienie: ikona na pasku narzędzi albo menu Wtyczki → PDF -> TIFF.
     2. "Katalog PDF" – katalog z plikami PDF do konwersji.
     3. "Katalog TIFF" – gdzie zapisać pliki TIFF (puste = obok plików PDF).
     4. "gdal_translate" – ścieżka do gdal_translate.exe (domyślnie wykrywana: instancja QGIS, PATH, C:\QGIS\bin, C:\OSGeo4W\bin, C:\Program Files\QGIS*).
     5. "DPI" – 200 dla PDF rastrowych (bez utraty jakości).
     6. Opcje: "Pomijaj istniejące TIFF", "Podkatalogi" (zachowuje strukturę katalogów).
-    7. START – górny pasek pokazuje bieżący plik, dolny postęp całości; log tekstowy niżej. STOP przerywa pracę (kończy bieżący proces GDAL).
+    7. Grupa "Strony PDF" (PDF wielostronicowe):
+       - "Tylko rysunki (domyślnie)" – zapisuje strony większe niż wybrany format (A3 = większe niż A4), czyli pomija opisówki A4 i inne strony tekstowe,
+       - "Wszystkie strony" – każda strona PDF-a,
+       - "Wskazane strony" – lista, np. 1,3,5-8.
+       Dodatkowo "Min. format rysunku" (A4 = bez filtra formatu) oraz "Min. pokrycie tuszem (procent)" (0 = filtr wyłączony, odsiewa strony puste).
+       Nazwy plików: PDF jednostronicowy → nazwa.tif, PDF wielostronicowy → nazwa_p01.tif, nazwa_p02.tif, ...
+       Każda decyzja (która strona i dlaczego) jest zapisywana w logu.
+    8. START – górny pasek pokazuje bieżący plik, dolny postęp całości; log tekstowy niżej. STOP przerywa pracę (kończy bieżący proces GDAL).
     Ustawienia pól są zapamiętywane w profilu QGIS.
     Wywoływana komenda:
       gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER "wejście.pdf" "wyjście.tif"
-    Algorytm w Panelu przetwarzania: "Konwertuj PDF do TIFF (bezstratnie)" (grupa Konwersja PDF) – można go użyć w modelach i w qgis_process.
+    Algorytm w Panelu przetwarzania: "Konwertuj PDF do TIFF (bezstratnie)" (grupa Konwersja PDF) – można go użyć w modelach i w qgis_process. Ma te same opcje wyboru stron (tryb, lista stron, min. format, min. tusz).
     Jak sprawdzić DPI PDF-a: gdalinfo "plik.pdf" (natywne DPI = szerokość_px / szerokość_strony_w_calach).
     === USER GUIDE (EN) ===
-    The plugin does exactly what the Laz_PDF_tiff desktop program does, inside QGIS.
+    The plugin converts PDF files to GeoTIFF losslessly through gdal_translate.
     1. Start: toolbar icon or menu Plugins → PDF -> TIFF.
     2. "Katalog PDF" – folder with PDF files.
     3. "Katalog TIFF" – output folder (empty = next to the PDFs).
     4. "gdal_translate" – path to gdal_translate.exe (auto-detected: current QGIS install, PATH, C:\QGIS\bin, C:\OSGeo4W\bin, C:\Program Files\QGIS*).
     5. "DPI" – 200 for raster PDFs (no quality loss).
     6. Options: "Pomijaj istniejące TIFF" (skip existing), "Podkatalogi" (keep folder structure).
-    7. START – the upper bar is the current file, the lower one the overall progress, text log below; STOP aborts (kills the running GDAL process).
+    7. "Strony PDF" group (multipage PDFs):
+       - "Tylko rysunki (domyślnie)" – saves pages larger than the chosen sheet format (A3 = larger than A4), so A4 description pages are skipped,
+       - "Wszystkie strony" – every page,
+       - "Wskazane strony" – a list, e.g. 1,3,5-8.
+       Plus "Min. format rysunku" (A4 = no format filter) and "Min. pokrycie tuszem (procent)" (0 = filter off, drops nearly blank pages).
+       File names: single-page PDF → name.tif, multipage PDF → name_p01.tif, name_p02.tif, ...
+       Every decision (which page and why) is written to the log.
+    8. START – the upper bar is the current file, the lower one the overall progress, text log below; STOP aborts (kills the running GDAL process).
     Field values are remembered in the QGIS profile.
     Command used:
       gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER "input.pdf" "output.tif"
-    Processing algorithm: "Konwertuj PDF do TIFF (bezstratnie)" (group "Konwersja PDF") – usable in models and qgis_process.
+    Processing algorithm: "Konwertuj PDF do TIFF (bezstratnie)" (group "Konwersja PDF") – usable in models and qgis_process, with the same page-selection options (mode, page list, min. format, min. ink).
     Checking a PDF's DPI: gdalinfo "file.pdf" (native DPI = width_px / page_width_in_inches).
 
 repository=https://github.com/gracy72/pdf2tiff_qgis
@@ -46,10 +60,12 @@ tags=pdf,tiff,geotiff,gdal,conversion,konwersja,raster,dpi,lossless,bezstratny
 icon=icon.png
 
 changelog=
+    1.1.0 - obsługa PDF wielostronicowych: strony odczytywane jako podzbiory GDAL ("PDF:numer:plik"), domyślny tryb "tylko rysunki" (strony większe niż wybrany format, np. A3 = większe niż A4, opisówki A4 pomijane), do wyboru też "wszystkie strony" i lista stron (np. 1,3,5-8); nazwy plików nazwa.tif (jednostronicowy) i nazwa_p01.tif, nazwa_p02.tif (wielostronicowy); regulacja min. formatu rysunku i min. pokrycia tuszem; log decyzji dla każdej strony; postęp liczony od stron; te same opcje w algorytmie Processing i w skrypcie. Poprawione wykrywanie typów wyliczeniowych parametrów (Qt6: QgsProcessingParameterNumber.Type.Integer, QgsProcessingParameterFile.Behavior.Folder/File) - zgodność z QGIS 3.22+ i QGIS 4.x.
+    1.1.0 - multipage PDF support: pages are read as GDAL subdatasets ("PDF:page:file"), the default mode is "drawings only" (pages larger than the chosen sheet format, e.g. A3 = larger than A4, A4 description pages skipped), with "all pages" and a custom page list (e.g. 1,3,5-8) also available; output names name.tif (single page) and name_p01.tif, name_p02.tif (multipage); configurable minimum sheet format and minimum ink coverage; per-page decision log; progress counted in pages; the same options in the Processing algorithm and the standalone script. Fixed enum type detection for Qt6 (QgsProcessingParameterNumber.Type.Integer, QgsProcessingParameterFile.Behavior.Folder/File) - works with QGIS 3.22+ and QGIS 4.x.
     1.0.1 - poprawki bezpieczeństwa wymagane przez repozytorium QGIS: gdal_translate uruchamiany przez QProcess (lista argumentów, bez powłoki systemowej, bez modułu subprocess) oraz usunięte puste bloki except/pass; bez zmian w działaniu.
     1.0.1 - security fixes required by the QGIS plugin repository: gdal_translate is started via QProcess (argument list, no system shell, no subprocess module) and empty except/pass blocks were removed; no functional change.
-    1.0.0 - pierwsza wersja: okno jak w programie Laz_PDF_tiff (katalog PDF/TIFF, gdal_translate, DPI, pomijanie istniejących, podkatalogi, dwa paski postępu, log, STOP), algorytm Processing, wykrywanie gdal_translate, zapamiętywanie ustawień.
-    1.0.0 - first release: the same window as the Laz_PDF_tiff program (PDF/TIFF folders, gdal_translate path, DPI, skip existing, subfolders, two progress bars, log, STOP), Processing algorithm, gdal_translate auto-detection, remembered settings.
+    1.0.0 - pierwsza wersja: okno konwertera (katalog PDF/TIFF, gdal_translate, DPI, pomijanie istniejących, podkatalogi, dwa paski postępu, log, STOP), algorytm Processing, wykrywanie gdal_translate, zapamiętywanie ustawień.
+    1.0.0 - first release: the converter window (PDF/TIFF folders, gdal_translate path, DPI, skip existing, subfolders, two progress bars, log, STOP), Processing algorithm, gdal_translate auto-detection, remembered settings.
 
 experimental=False
 deprecated=False
