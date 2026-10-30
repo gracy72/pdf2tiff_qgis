@@ -2,9 +2,9 @@
 """
 PDF2TIFF - konwerter PDF do TIFF (bezstratny, GDAL) - wtyczka QGIS.
 
-Odpowiednik programu Laz_PDF_tiff (Lazarus / Free Pascal):
-te same opcje, ten sam sposob wywolania gdal_translate, ta sama logika
-pomijania istniejacych plikow i zachowywania podkatalogow.
+Konwersja PDF-ow do GeoTIFF przez gdal_translate: renderowanie w zadanym DPI,
+kompresja bezstratna DEFLATE, PDF wielostronicowe z wyborem stron,
+pomijanie istniejacych plikow i zachowywanie struktury podkatalogow.
 """
 
 
