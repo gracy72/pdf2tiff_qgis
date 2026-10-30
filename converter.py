@@ -5,7 +5,7 @@ Konwerter PDF -> TIFF (bezstratny, GDAL) - logika wspolna.
 Modul nie tworzy widgetow, wiec korzysta z niego zarowno okno wtyczki
 (dialog.py), jak i algorytm Processing (algorithm.py).
 
-Wywoływana komenda jest identyczna jak w programie Laz_PDF_tiff:
+Wywoływana komenda:
 
     gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff
         -co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER
@@ -144,7 +144,7 @@ def build_dest_path(src, base_in, out_dir, keep_sub=False):
     """Zwraca (sciezka_tif, katalog_docelowy) dla pliku zrodlowego.
 
     Gdy keep_sub=True, struktura podkatalogow jest odtwarzana w katalogu
-    docelowym (tak jak opcja "Podkatalogi" w programie Lazarus).
+    docelowym (opcja "Podkatalogi").
     """
     try:
         rel = os.path.relpath(src, base_in)
@@ -174,7 +174,7 @@ def page_dest(base_tif, page, page_count):
 
 
 def build_gdal_arguments(dpi, src, dst):
-    """Argumenty gdal_translate - dokladnie jak w wersji Lazarus."""
+    """Argumenty gdal_translate - renderowanie w DPI i kompresja bezstratna."""
     return [
         '--config', 'GDAL_PDF_DPI', str(int(dpi)),
         '-of', 'GTiff',
@@ -530,9 +530,9 @@ def convert_pdf_file(gdal_path, path, base_dst, dpi,
 #  Watek konwersji dla okna wtyczki
 # ----------------------------------------------------------------------
 class ConversionThread(QThread):
-    """Konwersja w tle - odpowiednik TConvertThread z wersji Lazarus.
+    """Konwersja w tle (QThread) - okno QGIS pozostaje aktywne.
 
-    Sygnaly (zamiast Synchronize):
+    Sygnaly (zamiast blokowania interfejsu):
         fileProgress(int)   - postep biezacego pliku w %
         totalProgress(int)  - postep calosci w %
         statusMessage(str)  - tekst na gornej etykiecie
