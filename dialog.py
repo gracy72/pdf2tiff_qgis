@@ -6,6 +6,10 @@ Uklad, etykiety i zachowanie sa takie same jak w programie Laz_PDF_tiff:
 katalog PDF, katalog TIFF, sciezka gdal_translate, DPI, opcje
 "Pomijaj istniejace TIFF" i "Podkatalogi", przyciski START/STOP,
 dwa paski postepu (plik i calosc) oraz log na biezaco.
+
+Dodatkowo (wersja 1.1.0) wybor stron PDF: domyslnie konwertowane sa tylko
+rysunki (strony wieksze niz A4), do wyboru sa tez wszystkie strony albo
+wskazana lista stron.
 """
 
 import os
@@ -14,12 +18,16 @@ from datetime import datetime
 from qgis.core import QgsSettings
 from qgis.PyQt.QtGui import QFont, QIcon
 from qgis.PyQt.QtWidgets import (
-    QCheckBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QGridLayout,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QProgressBar, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from .converter import ConversionThread, detect_gdal_translate, list_pdf_files
+from .converter import (
+    DEFAULT_MIN_FORMAT, DEFAULT_MIN_INK, PAGE_MODE_ALL, PAGE_MODE_CUSTOM,
+    PAGE_MODE_DRAWINGS, SHEET_NAMES, ConversionThread, detect_gdal_translate,
+    list_pdf_files,
+)
 
 TITLE = 'Konwerter PDF -> TIFF  (bezstratny, GDAL)'
 
@@ -30,6 +38,10 @@ SET_GDAL = 'pdf2tiff/gdal_translate'
 SET_DPI = 'pdf2tiff/dpi'
 SET_SKIP = 'pdf2tiff/skip_existing'
 SET_SUB = 'pdf2tiff/subfolders'
+SET_PAGE_MODE = 'pdf2tiff/page_mode'
+SET_PAGE_SPEC = 'pdf2tiff/page_spec'
+SET_MIN_FORMAT = 'pdf2tiff/min_format'
+SET_MIN_INK = 'pdf2tiff/min_ink'
 
 
 class PdfToTiffDialog(QDialog):
@@ -48,15 +60,18 @@ class PdfToTiffDialog(QDialog):
 
         self.setWindowTitle(TITLE)
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icon.png')))
-        self.setMinimumSize(700, 520)
-        self.resize(818, 646)
+        self.setMinimumSize(720, 600)
+        self.resize(880, 720)
 
         self._build_ui()
         self._restore_settings()
+        self._update_page_widgets()
 
         self._log('Konwerter PDF -> TIFF (bezstratny). Wskaż katalog z PDF i naciśnij START.')
         self._log('Wskazówka: dla PDF rastrowych 200 DPI = natywna rozdzielczość (1:1, bez utraty jakości).')
         self._log('Kompresja TIFF: DEFLATE (bezstratna).')
+        self._log('PDF wielostronicowe: domyślnie zapisywane są tylko rysunki '
+                  '(strony większe niż wybrany format), jako nazwa_p01.tif, nazwa_p02.tif, ...')
 
     # ------------------------------------------------------------------
     #  Budowa interfejsu
@@ -130,6 +145,71 @@ class PdfToTiffDialog(QDialog):
         row.addWidget(self.btn_stop)
         grid.addWidget(options, 3, 0, 1, 3)
 
+        # --- Strony PDF
+        self.grp_pages = QGroupBox('Strony PDF')
+        pages = QVBoxLayout(self.grp_pages)
+
+        self.rad_drawings = QRadioButton('Tylko rysunki (domyślnie)')
+        self.rad_drawings.setChecked(True)
+        self.rad_drawings.setToolTip(
+            'Zapisuje strony większe niż wybrany format - w typowych PDF-ach\n'
+            '(opisówka A4 + rysunki A3/A2/A1/A0) zostają same rysunki.')
+        self.rad_all = QRadioButton('Wszystkie strony')
+        self.rad_custom = QRadioButton('Wskazane strony:')
+        self.rad_drawings.toggled.connect(self._update_page_widgets)
+        self.rad_all.toggled.connect(self._update_page_widgets)
+        self.rad_custom.toggled.connect(self._update_page_widgets)
+
+        self.edit_pages = QLineEdit()
+        self.edit_pages.setPlaceholderText('np. 1,3,5-8   (puste = wszystkie strony)')
+        self.edit_pages.setMinimumWidth(220)
+
+        row_pages = QHBoxLayout()
+        row_pages.addWidget(self.rad_drawings)
+        row_pages.addSpacing(12)
+        row_pages.addWidget(self.rad_all)
+        row_pages.addSpacing(12)
+        row_pages.addWidget(self.rad_custom)
+        row_pages.addWidget(self.edit_pages, 1)
+        pages.addLayout(row_pages)
+
+        self.cmb_format = QComboBox()
+        self.cmb_format.addItems(SHEET_NAMES)
+        self.cmb_format.setCurrentIndex(SHEET_NAMES.index(DEFAULT_MIN_FORMAT.upper())
+                                        if DEFAULT_MIN_FORMAT.upper() in SHEET_NAMES else 1)
+        self.cmb_format.setFixedWidth(80)
+        self.cmb_format.setToolTip(
+            'Minimalny format strony uznawanej za rysunek.\n'
+            'A3 = strony większe niż A4 (A3, A2, A1, A0 oraz ich obroty).\n'
+            'A4 = bez filtra formatu (wszystkie strony niepuste).')
+
+        self.spin_ink = QDoubleSpinBox()
+        self.spin_ink.setRange(0.0, 90.0)
+        self.spin_ink.setSingleStep(0.5)
+        self.spin_ink.setDecimals(1)
+        self.spin_ink.setValue(DEFAULT_MIN_INK)
+        self.spin_ink.setFixedWidth(80)
+        self.spin_ink.setToolTip(
+            'Minimalne pokrycie strony tuszem (%). 0 = filtr wyłączony.\n'
+            'Pomaga odrzucić strony puste (np. skany z plamami).')
+
+        row_filters = QHBoxLayout()
+        row_filters.addWidget(QLabel('Min. format rysunku:'))
+        row_filters.addWidget(self.cmb_format)
+        row_filters.addSpacing(18)
+        row_filters.addWidget(QLabel('Min. pokrycie tuszem (%):'))
+        row_filters.addWidget(self.spin_ink)
+        row_filters.addStretch(1)
+        pages.addLayout(row_filters)
+
+        self.lbl_pages_info = QLabel(
+            'Rysunek = strona większa niż wybrany format; PDF jednostronicowe są zawsze konwertowane. '
+            'Każda decyzja jest zapisywana w logu.')
+        self.lbl_pages_info.setWordWrap(True)
+        pages.addWidget(self.lbl_pages_info)
+
+        grid.addWidget(self.grp_pages, 4, 0, 1, 3)
+
         # --- status, paski postepu, log
         self.lbl_status = QLabel('Gotowy.')
 
@@ -155,6 +235,29 @@ class PdfToTiffDialog(QDialog):
         layout.addWidget(self.pb_total)
         layout.addWidget(self.log, 1)
 
+    def _update_page_widgets(self):
+        """Odblokowuje tylko te ustawienia stron, ktore maja znaczenie w danym trybie."""
+        drawings = self.rad_drawings.isChecked()
+        custom = self.rad_custom.isChecked()
+        self.cmb_format.setEnabled(drawings)
+        self.spin_ink.setEnabled(drawings)
+        self.edit_pages.setEnabled(custom)
+
+    def _page_mode(self):
+        if self.rad_all.isChecked():
+            return PAGE_MODE_ALL
+        if self.rad_custom.isChecked():
+            return PAGE_MODE_CUSTOM
+        return PAGE_MODE_DRAWINGS
+
+    def _page_mode_text(self):
+        mode = self._page_mode()
+        if mode == PAGE_MODE_ALL:
+            return 'wszystkie strony'
+        if mode == PAGE_MODE_CUSTOM:
+            return 'wskazane strony: %s' % (self.edit_pages.text().strip() or 'wszystkie')
+        return 'tylko rysunki (min. format %s)' % self.cmb_format.currentText()
+
     # ------------------------------------------------------------------
     #  Ustawienia (zapamietywanie pol miedzy uruchomieniami)
     # ------------------------------------------------------------------
@@ -173,6 +276,22 @@ class PdfToTiffDialog(QDialog):
         self.chk_skip.setChecked(self._as_bool(s.value(SET_SKIP, True)))
         self.chk_sub.setChecked(self._as_bool(s.value(SET_SUB, False)))
 
+        mode = str(s.value(SET_PAGE_MODE, PAGE_MODE_DRAWINGS) or PAGE_MODE_DRAWINGS)
+        if mode == PAGE_MODE_ALL:
+            self.rad_all.setChecked(True)
+        elif mode == PAGE_MODE_CUSTOM:
+            self.rad_custom.setChecked(True)
+        else:
+            self.rad_drawings.setChecked(True)
+        self.edit_pages.setText(s.value(SET_PAGE_SPEC, '', type=str))
+        fmt = str(s.value(SET_MIN_FORMAT, DEFAULT_MIN_FORMAT) or DEFAULT_MIN_FORMAT).upper()
+        if fmt in SHEET_NAMES:
+            self.cmb_format.setCurrentIndex(SHEET_NAMES.index(fmt))
+        try:
+            self.spin_ink.setValue(float(s.value(SET_MIN_INK, DEFAULT_MIN_INK)))
+        except (TypeError, ValueError):
+            self.spin_ink.setValue(DEFAULT_MIN_INK)
+
     def _save_settings(self):
         s = QgsSettings()
         s.setValue(SET_IN, self.edit_in.text().strip())
@@ -181,6 +300,10 @@ class PdfToTiffDialog(QDialog):
         s.setValue(SET_DPI, self.spin_dpi.value())
         s.setValue(SET_SKIP, self.chk_skip.isChecked())
         s.setValue(SET_SUB, self.chk_sub.isChecked())
+        s.setValue(SET_PAGE_MODE, self._page_mode())
+        s.setValue(SET_PAGE_SPEC, self.edit_pages.text().strip())
+        s.setValue(SET_MIN_FORMAT, self.cmb_format.currentText())
+        s.setValue(SET_MIN_INK, self.spin_ink.value())
 
     @staticmethod
     def _as_bool(value):
@@ -234,8 +357,12 @@ class PdfToTiffDialog(QDialog):
     def _set_busy(self, busy):
         for widget in (self.btn_start, self.btn_in, self.btn_out, self.btn_gdal,
                        self.edit_in, self.edit_out, self.edit_gdal,
-                       self.spin_dpi, self.chk_skip, self.chk_sub):
+                       self.spin_dpi, self.chk_skip, self.chk_sub,
+                       self.rad_drawings, self.rad_all, self.rad_custom,
+                       self.cmb_format, self.spin_ink, self.edit_pages):
             widget.setEnabled(not busy)
+        if not busy:
+            self._update_page_widgets()
         self.btn_stop.setEnabled(busy)
 
     # ------------------------------------------------------------------
@@ -272,6 +399,9 @@ class PdfToTiffDialog(QDialog):
         self._log('Katalog źródłowy    : %s' % in_dir)
         self._log('Katalog docelowy    : %s' % out_dir)
         self._log('DPI / kompresja     : %d / DEFLATE (bezstratna)' % self.spin_dpi.value())
+        self._log('Strony              : %s' % self._page_mode_text())
+        if self._page_mode() == PAGE_MODE_DRAWINGS and self.spin_ink.value() > 0:
+            self._log('Min. pokrycie tuszem: %.1f%%' % self.spin_ink.value())
         if self.chk_skip.isChecked():
             self._log('Tryb                : pomijanie istniejących TIFF')
 
@@ -287,6 +417,10 @@ class PdfToTiffDialog(QDialog):
             files,
             self.chk_skip.isChecked(),
             self.chk_sub.isChecked(),
+            self._page_mode(),
+            self.edit_pages.text().strip(),
+            self.cmb_format.currentText(),
+            self.spin_ink.value(),
         )
         self.thread.fileProgress.connect(self.pb_file.setValue)
         self.thread.totalProgress.connect(self.pb_total.setValue)
@@ -304,13 +438,13 @@ class PdfToTiffDialog(QDialog):
     def _on_done(self, ok_count, fail_count):
         self.pb_file.setValue(100)
         self.pb_total.setValue(100)
-        self._log('=== KONIEC: udane=%d, błędy=%d ===' % (ok_count, fail_count))
-        self._set_status('Zakończono. Udane: %d, błędy: %d.' % (ok_count, fail_count))
+        self._log('=== KONIEC: udane strony=%d, błędy=%d ===' % (ok_count, fail_count))
+        self._set_status('Zakończono. Udane strony: %d, błędy: %d.' % (ok_count, fail_count))
         self._set_busy(False)
         self.thread = None
         QMessageBox.information(
             self, TITLE,
-            'Konwersja zakończona.\nUdane: %d\nBłędy: %d' % (ok_count, fail_count))
+            'Konwersja zakończona.\nUdane strony: %d\nBłędy: %d' % (ok_count, fail_count))
 
     # ------------------------------------------------------------------
     def closeEvent(self, event):
