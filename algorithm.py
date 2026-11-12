@@ -7,6 +7,7 @@ Dzieki temu konwersje mozna uruchamiac z Panelu przetwarzania, z modeli
 
 Obslugiwane sa PDF wielostronicowe - wybor stron dziala tak samo jak w oknie
 wtyczki: tylko rysunki (domyslnie), wszystkie strony albo wskazana lista.
+Nazwy i opisy parametrow sa tlumaczone (i18n.py).
 """
 
 import os
@@ -21,8 +22,9 @@ from qgis.core import (
 from .converter import (
     DEFAULT_MIN_FORMAT, DEFAULT_MIN_INK, PAGE_MODE_ALL, PAGE_MODE_CUSTOM,
     PAGE_MODE_DRAWINGS, SHEET_NAMES, build_dest_path, convert_pdf_file,
-    detect_gdal_translate, list_pdf_files,
+    detect_gdal_translate, list_pdf_files, page_mode_labels,
 )
+from .i18n import tr
 
 
 def _enum_value(owner, scope_name, name):
@@ -47,12 +49,7 @@ _NUMBER_DOUBLE = _enum_value(QgsProcessingParameterNumber, 'Type', 'Double')
 _FILE_FOLDER = _enum_value(QgsProcessingParameterFile, 'Behavior', 'Folder')
 _FILE_FILE = _enum_value(QgsProcessingParameterFile, 'Behavior', 'File')
 
-#: Etykiety trybow stron (kolejnosc = wartosci listy wyboru)
-PAGE_MODE_LABELS = [
-    'tylko rysunki (domyślnie)',
-    'wszystkie strony',
-    'wskazane strony',
-]
+#: Wartosci listy wyboru trybu stron (kolejnosc = etykiety z i18n)
 PAGE_MODE_VALUES = [PAGE_MODE_DRAWINGS, PAGE_MODE_ALL, PAGE_MODE_CUSTOM]
 
 
@@ -74,64 +71,45 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
         return 'pdf_to_tiff'
 
     def displayName(self):
-        return 'Konwertuj PDF do TIFF (bezstratnie)'
+        return tr('alg_name')
 
     def group(self):
-        return 'Konwersja PDF'
+        return tr('alg_group')
 
     def groupId(self):
         return 'pdf2tiff'
 
     def shortHelpString(self):
-        return (
-            'Konwertuje pliki *.pdf z katalogu do plików *.tif przy pomocy '
-            'gdal_translate. Renderowanie w zadanym DPI i kompresja bezstratna DEFLATE, '
-            'więc jakość nie jest tracona.\n\n'
-            'PDF wielostronicowe: każda strona jest osobnym podzbiorem GDAL '
-            '("PDF:<numer>:<plik>"). Domyślnie zapisywane są tylko rysunki, czyli strony '
-            'większe niż wybrany format (A3 = większe niż A4) - opisówki A4 są pomijane. '
-            'Można też wybrać wszystkie strony albo listę stron (np. 1,3,5-8).\n\n'
-            'Nazwy plików: PDF jednostronicowy -> "nazwa.tif", PDF wielostronicowy -> '
-            '"nazwa_p01.tif", "nazwa_p02.tif", ...\n\n'
-            'Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość, czyli '
-            'odtworzenie 1:1. Wyższe DPI (400/600) to już interpolacja.\n\n'
-            'Wywoływana komenda:\n'
-            'gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff '
-            '-co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER '
-            '"wejście.pdf" "wyjście.tif"'
-        )
+        return tr('alg_help')
 
     def createInstance(self):
         return PdfToTiffAlgorithm()
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterFile(
-            self.INPUT_FOLDER, 'Katalog z plikami PDF', behavior=_FILE_FOLDER))
+            self.INPUT_FOLDER, tr('p_input'), behavior=_FILE_FOLDER))
         self.addParameter(QgsProcessingParameterFolderDestination(
-            self.OUTPUT_FOLDER, 'Katalog wynikowy (TIFF)'))
+            self.OUTPUT_FOLDER, tr('p_output')))
         self.addParameter(QgsProcessingParameterNumber(
-            self.DPI, 'DPI renderowania (200 = natywne dla PDF rastrowych)',
+            self.DPI, tr('p_dpi'),
             type=_NUMBER_INTEGER, defaultValue=200, minValue=72, maxValue=2400))
         self.addParameter(QgsProcessingParameterEnum(
-            self.PAGE_MODE, 'Strony PDF', options=PAGE_MODE_LABELS,
-            defaultValue=0))
+            self.PAGE_MODE, tr('p_page_mode'), options=page_mode_labels(), defaultValue=0))
         self.addParameter(QgsProcessingParameterString(
-            self.PAGES, 'Wskazane strony (np. 1,3,5-8; puste = wszystkie)',
-            defaultValue='', optional=True))
+            self.PAGES, tr('p_pages'), defaultValue='', optional=True))
         self.addParameter(QgsProcessingParameterEnum(
-            self.MIN_FORMAT, 'Minimalny format rysunku',
-            options=SHEET_NAMES,
+            self.MIN_FORMAT, tr('p_min_format'), options=SHEET_NAMES,
             defaultValue=SHEET_NAMES.index(DEFAULT_MIN_FORMAT.upper())))
         self.addParameter(QgsProcessingParameterNumber(
-            self.MIN_INK, 'Minimalne pokrycie tuszem %% (0 = bez filtra)',
+            self.MIN_INK, tr('p_min_ink'),
             type=_NUMBER_DOUBLE, defaultValue=DEFAULT_MIN_INK,
             minValue=0.0, maxValue=90.0))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.SKIP_EXISTING, 'Pomijaj istniejące TIFF', defaultValue=True))
+            self.SKIP_EXISTING, tr('p_skip'), defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.RECURSIVE, 'Przetwarzaj podkatalogi', defaultValue=False))
+            self.RECURSIVE, tr('p_recursive'), defaultValue=False))
         self.addParameter(QgsProcessingParameterFile(
-            self.GDAL_TRANSLATE, 'gdal_translate (puste = wykryj automatycznie)',
+            self.GDAL_TRANSLATE, tr('p_gdal'),
             behavior=_FILE_FILE, optional=True, defaultValue=''))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -139,15 +117,15 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
         if not gdal:
             gdal = detect_gdal_translate()
         if not os.path.isfile(gdal):
-            raise QgsProcessingException('Nie znaleziono gdal_translate: %s' % gdal)
+            raise QgsProcessingException(tr('exc_no_gdal', path=gdal))
 
         in_dir = self.parameterAsString(parameters, self.INPUT_FOLDER, context)
         if not os.path.isdir(in_dir):
-            raise QgsProcessingException('Katalog źródłowy nie istnieje: %s' % in_dir)
+            raise QgsProcessingException(tr('exc_no_in', path=in_dir))
 
         out_dir = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
         if not out_dir:
-            raise QgsProcessingException('Wskaż katalog wynikowy.')
+            raise QgsProcessingException(tr('exc_no_out'))
 
         dpi = self.parameterAsInt(parameters, self.DPI, context)
         skip_existing = self.parameterAsBool(parameters, self.SKIP_EXISTING, context)
@@ -169,17 +147,21 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
 
         files = list_pdf_files(in_dir, recursive)
         if not files:
-            raise QgsProcessingException('W katalogu nie znaleziono plików *.pdf.')
+            raise QgsProcessingException(tr('exc_no_pdf'))
 
-        feedback.pushInfo('gdal_translate : %s' % gdal)
-        feedback.pushInfo('Katalog źródłowy: %s' % in_dir)
-        feedback.pushInfo('Katalog docelowy: %s' % out_dir)
-        feedback.pushInfo('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
-        feedback.pushInfo('Tryb stron      : %s%s' % (
-            PAGE_MODE_LABELS[max(0, min(mode_index, len(PAGE_MODE_LABELS) - 1))],
-            '' if page_mode != PAGE_MODE_DRAWINGS else
-            ' (min. format %s, min. tusz %.1f%%)' % (min_format, min_ink)))
-        feedback.pushInfo('Plików do konwersji: %d' % len(files))
+        labels = page_mode_labels()
+        mode_label = labels[max(0, min(mode_index, len(labels) - 1))]
+
+        feedback.pushInfo(tr('info_gdal', path=gdal))
+        feedback.pushInfo(tr('info_in', path=in_dir))
+        feedback.pushInfo(tr('info_out', path=out_dir))
+        feedback.pushInfo(tr('info_dpi', dpi=dpi))
+        if page_mode == PAGE_MODE_DRAWINGS:
+            feedback.pushInfo(tr('mode_line_drawings', mode=mode_label,
+                                 fmt=min_format, ink=min_ink))
+        else:
+            feedback.pushInfo(tr('mode_line', mode=mode_label))
+        feedback.pushInfo(tr('info_files', count=len(files)))
 
         ok_count = 0
         fail_count = 0
@@ -188,7 +170,7 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
 
         for index, src in enumerate(files):
             if feedback.isCanceled():
-                feedback.pushInfo('Przerwano na żądanie użytkownika.')
+                feedback.pushInfo(tr('info_cancel'))
                 break
 
             feedback.setProgress(int(index * 100.0 / total))
@@ -200,8 +182,7 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
                 os.makedirs(dst_dir, exist_ok=True)
             except OSError as exc:
                 fail_count += 1
-                feedback.reportError('Nie można utworzyć katalogu %s (%s)' % (dst_dir, exc),
-                                     fatalError=False)
+                feedback.reportError(tr('info_mkdir', dir=dst_dir, err=exc), fatalError=False)
                 continue
 
             ok, fail, skipped = convert_pdf_file(
@@ -213,8 +194,7 @@ class PdfToTiffAlgorithm(QgsProcessingAlgorithm):
             skipped_count += skipped
 
         feedback.setProgress(100)
-        feedback.pushInfo('=== KONIEC: udane strony=%d, błędy=%d, pominięte=%d ===' % (
-            ok_count, fail_count, skipped_count))
+        feedback.pushInfo(tr('info_done', ok=ok_count, fail=fail_count, skip=skipped_count))
         return {self.OUTPUT_FOLDER: out_dir}
 
 
@@ -228,7 +208,7 @@ class PdfToTiffProvider(QgsProcessingProvider):
         return 'PDF -> TIFF (GDAL)'
 
     def longDescription(self):
-        return 'Konwersja PDF do GeoTIFF (bezstratna, gdal_translate).'
+        return tr('plugin_tip')
 
     def icon(self):
         from qgis.PyQt.QtGui import QIcon
