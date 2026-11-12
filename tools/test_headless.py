@@ -44,6 +44,14 @@ log('classFactory OK ->', plugin_cls.__name__)
 conv = importlib.import_module(PKG + '.converter')
 log('wykryty gdal_translate:', conv.detect_gdal_translate())
 
+# ---------------------------------------------------------------- jezyk
+i18n_mod = importlib.import_module(PKG + '.i18n')
+log('jezyk interfejsu:', i18n_mod.language(),
+    '| PDF2TIFF_LANG =', os.environ.get('PDF2TIFF_LANG', '(brak)'))
+log('  tytul okna     :', i18n_mod.tr('title'))
+log('  algorytm       :', i18n_mod.tr('alg_name'))
+log('  tryby stron    :', ' / '.join(conv.page_mode_labels()))
+
 # ---------------------------------------------------------------- okno
 dlg_mod = importlib.import_module(PKG + '.dialog')
 dlg = dlg_mod.PdfToTiffDialog()
