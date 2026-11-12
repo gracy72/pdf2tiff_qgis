@@ -13,8 +13,14 @@ from qgis.PyQt.QtGui import QIcon
 
 from .algorithm import PdfToTiffProvider
 from .dialog import PdfToTiffDialog
+from .i18n import tr
 
-MENU_NAME = '&PDF -> TIFF'
+MENU_KEY = 'menu'
+
+
+def menu_name():
+    """Nazwa menu w aktualnym jezyku (wczytywana przy initGui)."""
+    return tr(MENU_KEY)
 
 
 class PdfToTiffPlugin(object):
@@ -25,18 +31,19 @@ class PdfToTiffPlugin(object):
         self.action = None
         self.provider = None
         self.dialog = None
+        self.menu = menu_name()
 
     # ------------------------------------------------------------------
     def initGui(self):
         icon = QIcon(os.path.join(os.path.dirname(__file__), 'icon.png'))
 
-        self.action = QAction(icon, 'Konwerter PDF -> TIFF (bezstratny, GDAL)',
-                              self.iface.mainWindow())
-        self.action.setStatusTip('Konwersja wszystkich plików PDF z katalogu do TIFF (GDAL, DEFLATE)')
+        self.menu = menu_name()
+        self.action = QAction(icon, tr('plugin_tip'), self.iface.mainWindow())
+        self.action.setStatusTip(tr('plugin_tip'))
         self.action.triggered.connect(self.run)
 
         self.iface.addToolBarIcon(self.action)
-        self.iface.addPluginToMenu(MENU_NAME, self.action)
+        self.iface.addPluginToMenu(self.menu, self.action)
 
         # algorytm dostepny w Panelu przetwarzania / modelach
         if self.provider is None:
@@ -45,7 +52,7 @@ class PdfToTiffPlugin(object):
 
     def unload(self):
         if self.action is not None:
-            self.iface.removePluginMenu(MENU_NAME, self.action)
+            self.iface.removePluginMenu(self.menu, self.action)
             self.iface.removeToolBarIcon(self.action)
             self.action.deleteLater()
             self.action = None
