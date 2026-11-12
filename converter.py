@@ -29,6 +29,8 @@ import shutil
 
 from qgis.PyQt.QtCore import QProcess, QThread, pyqtSignal
 
+from .i18n import tr
+
 #: Sciezki sprawdzane, gdy nie uda sie znalezc gdal_translate w inny sposob
 GDAL_CANDIDATES = [
     r'C:\QGIS\bin\gdal_translate.exe',
@@ -193,12 +195,13 @@ PAGE_MODE_DRAWINGS = 'drawings'
 PAGE_MODE_ALL = 'all'
 PAGE_MODE_CUSTOM = 'custom'
 
-#: (wartosc, etykieta) - kolejnosc jak w oknie wtyczki i w algorytmie
-PAGE_MODES = [
-    (PAGE_MODE_DRAWINGS, 'tylko rysunki (pomijaj opisówki)'),
-    (PAGE_MODE_ALL, 'wszystkie strony'),
-    (PAGE_MODE_CUSTOM, 'wskazane strony (np. 1,3,5-8)'),
-]
+#: Tryby wyboru stron (kolejnosc = kolejnosc w oknie i w algorytmie)
+PAGE_MODES = [PAGE_MODE_DRAWINGS, PAGE_MODE_ALL, PAGE_MODE_CUSTOM]
+
+
+def page_mode_labels():
+    """Etykiety trybow stron w aktualnym jezyku (do list wyboru Processing)."""
+    return [tr('opt_mode_drawings'), tr('opt_mode_all'), tr('opt_mode_custom')]
 
 #: Formaty arkuszy w mm (krotny bok, dlugi bok)
 SHEET_MM = [
@@ -317,12 +320,12 @@ def is_drawing_page(name, min_format=DEFAULT_MIN_FORMAT, min_ink=DEFAULT_MIN_INK
     needed = sheet_area_mm2(min_format) * SIZE_TOLERANCE
     opis = '%.0f x %.0f mm' % (width, height)
     if area < needed:
-        return False, '%s (mniejsza niż %s)' % (opis, str(min_format).upper())
+        return False, tr('reason_too_small', size=opis, fmt=str(min_format).upper())
     if min_ink > 0:
         ink = page_ink_percent(name)
         if ink < float(min_ink):
-            return False, '%s, tusz %.2f%% (min. %.2f%%)' % (opis, ink, float(min_ink))
-        return True, '%s, tusz %.2f%%' % (opis, ink)
+            return False, tr('reason_ink', size=opis, ink=ink, min=float(min_ink))
+        return True, tr('reason_kept', size=opis, ink=ink)
     return True, opis
 
 
@@ -394,7 +397,7 @@ def plan_pdf_pages(path, page_mode=PAGE_MODE_DRAWINGS, page_spec='',
         if not wanted:
             wanted = list(range(1, count + 1))
         tasks = [(page, source(page)) for page in wanted]
-        note = 'wybrane strony (%d z %d): %s' % (len(wanted), count, _pages_text(wanted))
+        note = tr('note_custom', count=len(wanted), total=count, list=_pages_text(wanted))
         return count, tasks, [], note
 
     if page_mode == PAGE_MODE_ALL:
@@ -410,14 +413,14 @@ def plan_pdf_pages(path, page_mode=PAGE_MODE_DRAWINGS, page_spec='',
         width, height = page_size_mm(source(page))
         opis = '%.0f x %.0f mm' % (width, height)
         if width * height < needed:
-            skipped.append((page, '%s (mniejsza niż %s)' % (opis, str(min_format).upper())))
+            skipped.append((page, tr('reason_too_small', size=opis,
+                                     fmt=str(min_format).upper())))
         else:
             bigger.append(page)
             opisy[page] = opis
 
     if not bigger:
-        note = ('żadna strona nie jest większa niż %s - konwertuję wszystkie strony '
-                '(zmień "Min. format rysunku", aby filtrować)' % str(min_format).upper())
+        note = tr('note_no_big', fmt=str(min_format).upper())
         return count, [(page, source(page)) for page in range(1, count + 1)], [], note
 
     # opcjonalny filtr stron prawie pustych (tylko wśród uznanych za rysunki)
@@ -426,8 +429,8 @@ def plan_pdf_pages(path, page_mode=PAGE_MODE_DRAWINGS, page_spec='',
         for page in bigger:
             ink = page_ink_percent(source(page))
             if ink < float(min_ink):
-                skipped.append((page, '%s, tusz %.2f%% (min. %.2f%%)' % (
-                    opisy[page], ink, float(min_ink))))
+                skipped.append((page, tr('reason_ink', size=opisy[page], ink=ink,
+                                         min=float(min_ink))))
             else:
                 tasks.append((page, source(page)))
         skipped.sort()
@@ -471,7 +474,7 @@ def run_gdal_sync(gdal_path, src, dst, dpi, timeout_ms=-1):
     proc.start(gdal_path, build_gdal_arguments(dpi, src, dst))
 
     if not proc.waitForStarted(20000):
-        return False, -1, '', 'Nie można uruchomić gdal_translate: %s' % gdal_path
+        return False, -1, '', tr('err_start_gdal_sync', path=gdal_path)
 
     proc.waitForFinished(timeout_ms)
     text = bytes(proc.readAll()).decode('utf-8', 'replace')
@@ -492,13 +495,13 @@ def convert_pdf_file(gdal_path, path, base_dst, dpi,
     count, tasks, skipped, note = plan_pdf_pages(path, page_mode, page_spec,
                                                  min_format, min_ink)
 
-    emit('        stron: %d, do konwersji: %d' % (count, len(tasks)))
+    emit(tr('sync_pages', pages=count, todo=len(tasks)))
     if note:
         emit('        %s' % note)
     for page, reason in skipped:
-        emit('        str. %d: pominięta (%s)' % (page, reason))
+        emit(tr('log_page_skipped', page=page, reason=reason))
     if not tasks:
-        emit('        brak stron do konwersji')
+        emit(tr('log_no_pages'))
         return 0, 0, 0
 
     ok_count = 0
@@ -507,19 +510,19 @@ def convert_pdf_file(gdal_path, path, base_dst, dpi,
     for page, src in tasks:
         dst = page_dest(base_dst, page, count)
         if skip_existing and os.path.isfile(dst):
-            emit('        str. %d -> %s : pominięto (plik istnieje)' % (page, os.path.basename(dst)))
+            emit(tr('sync_page_skip', page=page, file=os.path.basename(dst)))
             skip_count += 1
             continue
         success, rc, size_info, output = run_gdal_sync(gdal_path, src, dst, dpi)
         if success:
             ok_count += 1
             if size_info:
-                emit('        str. %d -> %s : OK (%s px)' % (page, os.path.basename(dst), size_info))
+                emit(tr('sync_page_ok', page=page, file=os.path.basename(dst), size=size_info))
             else:
-                emit('        str. %d -> %s : OK' % (page, os.path.basename(dst)))
+                emit(tr('sync_page_ok_short', page=page, file=os.path.basename(dst)))
         else:
             fail_count += 1
-            emit('        str. %d -> %s : BŁĄD (kod %d)' % (page, os.path.basename(dst), rc))
+            emit(tr('sync_page_err', page=page, file=os.path.basename(dst), rc=rc))
             if output:
                 tail = '\n'.join(output.strip().splitlines()[-5:])
                 emit('            %s' % tail.replace('\n', ' | '))
@@ -598,15 +601,14 @@ class ConversionThread(QThread):
         for index, src in enumerate(self.files):
             if self._stop:
                 break
-            self.statusMessage.emit('Analiza stron [%d/%d] %s' % (
-                index + 1, self.count, os.path.basename(src)))
+            self.statusMessage.emit(tr('status_analyse', i=index + 1, n=self.count,
+                                       name=os.path.basename(src)))
             base_dst, dst_dir = build_dest_path(src, self.base_in, self.out_dir, self.keep_sub)
             try:
                 count, tasks, skipped, note = plan_pdf_pages(
                     src, self.page_mode, self.page_spec, self.min_format, self.min_ink)
             except (RuntimeError, ValueError, OSError) as exc:
-                self.logMessage.emit('%s: nie można odczytać stron (%s)' % (
-                    os.path.basename(src), exc))
+                self.logMessage.emit(tr('err_read_pages', name=os.path.basename(src), err=exc))
                 count, tasks, skipped, note = 1, [(1, src)], [], ''
             plan.append((src, base_dst, dst_dir, count, tasks, skipped, note))
         return plan
@@ -621,12 +623,12 @@ class ConversionThread(QThread):
         try:
             proc.start(self.gdal, build_gdal_arguments(self.dpi, src, dst))
         except RuntimeError as exc:
-            self.logMessage.emit('            BŁĄD: nie można uruchomić gdal_translate (%s)' % exc)
+            self.logMessage.emit(tr('err_run_gdal', err=exc))
             self._proc = None
             return False, -1, ''
 
         if not proc.waitForStarted(20000):
-            self.logMessage.emit('            BŁĄD: nie można uruchomić gdal_translate')
+            self.logMessage.emit(tr('err_start_gdal'))
             self._proc = None
             return False, -1, ''
 
@@ -677,14 +679,14 @@ class ConversionThread(QThread):
                 break
 
             self.statusMessage.emit('[%d/%d] %s' % (index + 1, self.count, os.path.basename(src)))
-            self.logMessage.emit('[%d/%d] %s  (stron: %d, do konwersji: %d)' % (
-                index + 1, self.count, os.path.basename(src), count, len(tasks)))
+            self.logMessage.emit(tr('log_file', i=index + 1, n=self.count,
+                                    name=os.path.basename(src), pages=count, todo=len(tasks)))
             if note:
                 self.logMessage.emit('        %s' % note)
             for page, reason in skipped:
-                self.logMessage.emit('        str. %d: pominięta (%s)' % (page, reason))
+                self.logMessage.emit(tr('log_page_skipped', page=page, reason=reason))
             if not tasks:
-                self.logMessage.emit('        brak stron do konwersji')
+                self.logMessage.emit(tr('log_no_pages'))
                 continue
 
             try:
@@ -693,7 +695,7 @@ class ConversionThread(QThread):
             except OSError as exc:
                 fail_count += len(tasks)
                 self.done_pages += len(tasks)
-                self.logMessage.emit('        BŁĄD: nie można utworzyć katalogu %s (%s)' % (dst_dir, exc))
+                self.logMessage.emit(tr('err_mkdir', dir=dst_dir, err=exc))
                 self._set_total()
                 continue
 
@@ -702,12 +704,12 @@ class ConversionThread(QThread):
                     break
 
                 dst = page_dest(base_dst, page, count)
-                self.statusMessage.emit('[%d/%d] %s  str. %d/%d' % (
-                    index + 1, self.count, os.path.basename(src), page, count))
-                self.logMessage.emit('        str. %d -> %s' % (page, os.path.basename(dst)))
+                self.statusMessage.emit(tr('status_page', i=index + 1, n=self.count,
+                                           name=os.path.basename(src), page=page, pages=count))
+                self.logMessage.emit(tr('log_page', page=page, file=os.path.basename(dst)))
 
                 if self.skip_existing and os.path.isfile(dst):
-                    self.logMessage.emit('            pominięto (plik TIFF już istnieje)')
+                    self.logMessage.emit(tr('log_page_exists'))
                     ok_count += 1
                     self.done_pages += 1
                     self.fileProgress.emit(int(position * 100.0 / len(tasks)))
@@ -723,16 +725,15 @@ class ConversionThread(QThread):
                 if success:
                     ok_count += 1
                     if size_info:
-                        self.logMessage.emit('            OK  (%s px, DPI %d, bezstratnie)' % (
-                            size_info, self.dpi))
+                        self.logMessage.emit(tr('log_page_ok', size=size_info, dpi=self.dpi))
                     else:
-                        self.logMessage.emit('            OK  (DPI %d, bezstratnie)' % self.dpi)
+                        self.logMessage.emit(tr('log_page_ok_short', dpi=self.dpi))
                 else:
                     fail_count += 1
                     if self._stop:
-                        self.logMessage.emit('            PRZERWANO')
+                        self.logMessage.emit(tr('log_page_aborted'))
                     else:
-                        self.logMessage.emit('            BŁĄD (kod %d)' % rc)
+                        self.logMessage.emit(tr('log_page_error', rc=rc))
 
                 self.done_pages += 1
                 self.fileProgress.emit(int(position * 100.0 / len(tasks)))
