@@ -22,6 +22,7 @@ FILES = [
     'dialog.py',
     'converter.py',
     'algorithm.py',
+    'i18n.py',
     'skrypt_pdf2tiff.py',
     'icon.png',
     'README.md',
