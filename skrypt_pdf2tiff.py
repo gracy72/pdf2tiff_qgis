@@ -41,12 +41,20 @@ Kompresja DEFLATE jest bezstratna, wiec jakosc nie jest tracona.
 
 Uwaga bezpieczenstwa: gdal_translate uruchamiany jest wylacznie przez QProcess
 z lista argumentow - bez powloki systemowej i bez modulu subprocess.
+
+JEZYK KOMUNIKATOW
+-----------------
+Komunikaty (nazwy parametrow, opisy, log) pochodza z modulu i18n.py, ktory
+znajduje sie obok tego pliku w paczce wtyczki. Jezyk jest brany z ustawien QGIS
+(interfejs polski = komunikaty polskie). Gdy i18n.py nie ma obok skryptu,
+uzywane sa komunikaty angielskie.
 """
 
 import glob
 import os
 import re
 import shutil
+import sys
 
 from qgis.PyQt.QtCore import QProcess
 
@@ -56,6 +64,99 @@ from qgis.core import (
     QgsProcessingParameterFolderDestination, QgsProcessingParameterNumber,
     QgsProcessingParameterString,
 )
+
+# ----------------------------------------------------------------------
+#  Tlumaczenia
+# ----------------------------------------------------------------------
+# Skrypt uzywa tego samego modulu i18n.py co wtyczka, wiec komunikaty zaleza
+# od jezyka QGIS. Gdy i18n.py lezy obok skryptu (tak jest w paczce wtyczki),
+# wystarczy dopisac katalog skryptu do sys.path. Gdy ktos skopiuje sam plik,
+# uzywane sa komunikaty angielskie z tabeli awaryjnej _EN_FALLBACK.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE and _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+try:
+    from .i18n import tr                       # wtyczka: pakiet pdf2tiff
+except (ImportError, ValueError):
+    try:
+        from i18n import tr                    # skrypt dodany z pliku
+    except ImportError:                        # sam plik - awaryjnie po angielsku
+        _EN_FALLBACK = {
+            'alg_name': 'Convert PDF to TIFF (lossless)',
+            'alg_group': 'PDF conversion',
+            'alg_help': (
+                'Converts *.pdf files from a folder to *.tif with gdal_translate: rendering at '
+                'the chosen DPI, lossless DEFLATE compression.\n\n'
+                'Multipage PDFs: every page is a separate GDAL subdataset. By default only '
+                'drawings are saved (pages larger than the chosen sheet format - A3 means '
+                '"larger than A4"), so A4 description pages are skipped. You can also choose '
+                'all pages or a page list, e.g. 1,3,5-8.\n\n'
+                'File names: single-page PDF -> name.tif, multipage PDF -> name_p01.tif, '
+                'name_p02.tif, ...\n\n'
+                'For raster PDFs (e.g. drawings exported from CAD) 200 DPI is the native '
+                'resolution (1:1). Higher DPI only interpolates.\n\n'
+                'Command used:\n'
+                'gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff -co COMPRESS=DEFLATE '
+                '-co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER "input.pdf" "output.tif"'
+            ),
+            'p_input': 'Folder with PDF files',
+            'p_output': 'Output folder (TIFF)',
+            'p_dpi': 'Rendering DPI (200 = native for raster PDFs)',
+            'p_page_mode': 'PDF pages',
+            'p_pages': 'Selected pages (e.g. 1,3,5-8; empty = all)',
+            'p_min_format': 'Minimum drawing sheet size',
+            'p_min_ink': 'Minimum ink coverage in percent (0 = no filter)',
+            'p_skip': 'Skip existing TIFF',
+            'p_recursive': 'Process subfolders',
+            'p_gdal': 'gdal_translate (empty = detect automatically)',
+            'opt_mode_drawings': 'drawings only (default)',
+            'opt_mode_all': 'all pages',
+            'opt_mode_custom': 'selected pages',
+            'mode_line': 'Pages mode      : %(mode)s',
+            'mode_line_drawings': ('Pages mode      : %(mode)s '
+                                   '(min. sheet %(fmt)s, min. ink %(ink).1f%%)'),
+            'info_gdal': 'gdal_translate : %(path)s',
+            'info_in': 'Source folder  : %(path)s',
+            'info_out': 'Target folder  : %(path)s',
+            'info_dpi': 'DPI / compression: %(dpi)d / DEFLATE (lossless)',
+            'info_files': 'Files to convert: %(count)d',
+            'info_cancel': 'Cancelled by the user.',
+            'info_mkdir': 'Cannot create folder %(dir)s (%(err)s)',
+            'info_done': ('=== DONE: pages ok=%(ok)d, errors=%(fail)d, '
+                          'skipped=%(skip)d ==='),
+            'exc_no_gdal': 'gdal_translate not found: %(path)s',
+            'exc_no_in': 'Source folder does not exist: %(path)s',
+            'exc_no_out': 'Choose the output folder.',
+            'exc_no_pdf': 'No *.pdf files found in the folder.',
+            'err_start_gdal_sync': 'Cannot start gdal_translate: %(path)s',
+            'err_read_pages': '%(name)s: cannot read pages (%(err)s)',
+            'sync_pages': '        pages: %(pages)d, to convert: %(todo)d',
+            'sync_page_skip': '        page %(page)d -> %(file)s : skipped (file exists)',
+            'sync_page_ok': '        page %(page)d -> %(file)s : OK (%(size)s px)',
+            'sync_page_ok_short': '        page %(page)d -> %(file)s : OK',
+            'sync_page_err': '        page %(page)d -> %(file)s : ERROR (code %(rc)d)',
+            'log_page_skipped': '        page %(page)d: skipped (%(reason)s)',
+            'log_no_pages': '        no pages to convert',
+            'err_mkdir': '        ERROR: cannot create folder %(dir)s (%(err)s)',
+            'reason_too_small': '%(size)s (smaller than %(fmt)s)',
+            'reason_ink': '%(size)s, ink %(ink).2f%% (min. %(min).2f%%)',
+            'reason_kept': '%(size)s, ink %(ink).2f%%',
+            'note_no_big': ('no page is larger than %(fmt)s - converting all pages '
+                            '(change "Min. drawing sheet size" to filter)'),
+            'note_custom': 'selected pages (%(count)d of %(total)d): %(list)s',
+        }
+
+        def tr(key, **kwargs):
+            """Tekst angielski z tabeli awaryjnej (gdy brak modulu i18n)."""
+            text = _EN_FALLBACK.get(key, key)
+            if kwargs:
+                try:
+                    text = text % kwargs
+                except (KeyError, TypeError, ValueError):
+                    return text
+            return text
+
 
 # ----------------------------------------------------------------------
 #  Stale i pomocnicze
@@ -229,7 +330,7 @@ def uruchom_gdal(gdal, src, dst, dpi):
     proc.start(gdal, argumenty_gdal(dpi, src, dst))
 
     if not proc.waitForStarted(20000):
-        return False, -1, '', 'Nie można uruchomić gdal_translate: %s' % gdal
+        return False, -1, '', tr('err_start_gdal_sync', path=gdal)
 
     proc.waitForFinished(-1)
     tekst = bytes(proc.readAll()).decode('utf-8', 'replace')
@@ -262,13 +363,22 @@ TRYB_RYSUNKI = 'drawings'
 TRYB_WSZYSTKIE = 'all'
 TRYB_WYBRANE = 'custom'
 
-TRYBY_STRON = [
-    (TRYB_RYSUNKI, 'tylko rysunki (pomijaj opisówki)'),
-    (TRYB_WSZYSTKIE, 'wszystkie strony'),
-    (TRYB_WYBRANE, 'wskazane strony (np. 1,3,5-8)'),
-]
-ETYKIETY_TRYBOW = [etykieta for _, etykieta in TRYBY_STRON]
-WARTOSCI_TRYBOW = [wartosc for wartosc, _ in TRYBY_STRON]
+TRYBY_STRON = [TRYB_RYSUNKI, TRYB_WSZYSTKIE, TRYB_WYBRANE]
+WARTOSCI_TRYBOW = TRYBY_STRON
+
+
+def etykiety_trybow():
+    """Nazwy trybow stron w aktualnym jezyku (kolejnosc = TRYBY_STRON)."""
+    return [tr('opt_mode_drawings'), tr('opt_mode_all'), tr('opt_mode_custom')]
+
+
+def opis_trybu(tryb_stron):
+    """Krotka nazwa trybu stron (do logu / parametrow)."""
+    if tryb_stron == TRYB_WSZYSTKIE:
+        return tr('opt_mode_all')
+    if tryb_stron == TRYB_WYBRANE:
+        return tr('opt_mode_custom')
+    return tr('opt_mode_drawings')
 
 #: Formaty arkuszy w mm (krotny bok, dlugi bok)
 FORMATY_MM = [
@@ -384,12 +494,12 @@ def czy_rysunek(nazwa, min_format=DOMYSLNY_FORMAT, min_tusz=DOMYSLNY_TUSZ):
     needed = powierzchnia_formatu(min_format) * TOLERANCJA_FORMATU
     opis = '%.0f x %.0f mm' % (width, height)
     if area < needed:
-        return False, '%s (mniejsza niż %s)' % (opis, str(min_format).upper())
+        return False, tr('reason_too_small', size=opis, fmt=str(min_format).upper())
     if min_tusz > 0:
         tusz = pokrycie_tuszem(nazwa)
         if tusz < float(min_tusz):
-            return False, '%s, tusz %.2f%% (min. %.2f%%)' % (opis, tusz, float(min_tusz))
-        return True, '%s, tusz %.2f%%' % (opis, tusz)
+            return False, tr('reason_ink', size=opis, ink=tusz, min=float(min_tusz))
+        return True, tr('reason_kept', size=opis, ink=tusz)
     return True, opis
 
 
@@ -456,7 +566,8 @@ def plan_stron_pdf(sciezka, tryb=TRYB_RYSUNKI, lista_stron='',
     if tryb == TRYB_WYBRANE:
         wybrane = parsuj_liste_stron(lista_stron, count) or list(range(1, count + 1))
         zadania = [(s, zrodlo(s)) for s in wybrane]
-        uwaga = 'wybrane strony (%d z %d): %s' % (len(wybrane), count, _tekst_stron(wybrane))
+        uwaga = tr('note_custom', count=len(wybrane), total=count,
+                   list=_tekst_stron(wybrane))
         return count, zadania, [], uwaga
 
     if tryb == TRYB_WSZYSTKIE:
@@ -472,14 +583,14 @@ def plan_stron_pdf(sciezka, tryb=TRYB_RYSUNKI, lista_stron='',
         width, height = rozmiar_strony_mm(zrodlo(strona))
         opis = '%.0f x %.0f mm' % (width, height)
         if width * height < potrzebna:
-            pominiete.append((strona, '%s (mniejsza niż %s)' % (opis, str(min_format).upper())))
+            pominiete.append((strona, tr('reason_too_small', size=opis,
+                                         fmt=str(min_format).upper())))
         else:
             wieksze.append(strona)
             opisy[strona] = opis
 
     if not wieksze:
-        uwaga = ('żadna strona nie jest większa niż %s - konwertuję wszystkie strony '
-                 '(zmień "Min. format rysunku", aby filtrować)' % str(min_format).upper())
+        uwaga = tr('note_no_big', fmt=str(min_format).upper())
         return count, [(s, zrodlo(s)) for s in range(1, count + 1)], [], uwaga
 
     # opcjonalny filtr stron prawie pustych (tylko wśród uznanych za rysunki)
@@ -487,8 +598,8 @@ def plan_stron_pdf(sciezka, tryb=TRYB_RYSUNKI, lista_stron='',
         for strona in wieksze:
             tusz = pokrycie_tuszem(zrodlo(strona))
             if tusz < float(min_tusz):
-                pominiete.append((strona, '%s, tusz %.2f%% (min. %.2f%%)'
-                                  % (opisy[strona], tusz, float(min_tusz))))
+                pominiete.append((strona, tr('reason_ink', size=opisy[strona],
+                                             ink=tusz, min=float(min_tusz))))
             else:
                 zadania.append((strona, zrodlo(strona)))
         pominiete.sort()
@@ -511,26 +622,27 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
     Zwraca slownik: {'udane': int, 'bledy': int, 'pominiete': int, 'pliki': int}.
     """
     if not katalog_pdf or not os.path.isdir(katalog_pdf):
-        raise ValueError('Katalog z PDF nie istnieje: %s' % katalog_pdf)
+        raise ValueError(tr('exc_no_in', path=katalog_pdf))
 
     katalog_tiff = katalog_tiff or katalog_pdf
     gdal = gdal_translate or detect_gdal_translate()
     if not os.path.isfile(gdal):
-        raise ValueError('Nie znaleziono gdal_translate: %s' % gdal)
+        raise ValueError(tr('exc_no_gdal', path=gdal))
 
     pliki = lista_pdf(katalog_pdf, podkatalogi)
-    log('gdal_translate : %s' % gdal)
-    log('Katalog PDF     : %s' % katalog_pdf)
-    log('Katalog TIFF    : %s' % katalog_tiff)
-    log('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
+    log(tr('info_gdal', path=gdal))
+    log(tr('info_in', path=katalog_pdf))
+    log(tr('info_out', path=katalog_tiff))
+    log(tr('info_dpi', dpi=int(dpi)))
     if tryb_stron == TRYB_RYSUNKI:
-        log('Tryb stron      : tylko rysunki (min. format %s, min. tusz %.1f%%)'
-            % (min_format, float(min_tusz)))
+        log(tr('mode_line_drawings', mode=opis_trybu(tryb_stron),
+               fmt=str(min_format).upper(), ink=float(min_tusz)))
     elif tryb_stron == TRYB_WYBRANE:
-        log('Tryb stron      : wskazane strony: %s' % (lista_stron or 'wszystkie'))
+        log(tr('mode_line', mode=tr('mode_text_custom',
+                                    spec=lista_stron or tr('all_pages_word'))))
     else:
-        log('Tryb stron      : wszystkie strony')
-    log('Plików          : %d' % len(pliki))
+        log(tr('mode_line', mode=opis_trybu(tryb_stron)))
+    log(tr('info_files', count=len(pliki)))
 
     udane = bledy = pominiete = 0
 
@@ -542,22 +654,22 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
             liczba_stron, zadania, odrzucone, uwaga = plan_stron_pdf(
                 src, tryb_stron, lista_stron, min_format, min_tusz)
         except (RuntimeError, ValueError, OSError) as exc:
-            log('        nie można odczytać stron (%s)' % exc)
+            log(tr('err_read_pages', name=os.path.basename(src), err=exc))
             liczba_stron, zadania, odrzucone, uwaga = 1, [(1, src)], [], []
 
-        log('        stron: %d, do konwersji: %d' % (liczba_stron, len(zadania)))
+        log(tr('sync_pages', pages=liczba_stron, todo=len(zadania)))
         if uwaga:
             log('        %s' % uwaga)
         for strona, powod in odrzucone:
-            log('        str. %d: pominięta (%s)' % (strona, powod))
+            log(tr('log_page_skipped', page=strona, reason=powod))
         if not zadania:
-            log('        brak stron do konwersji')
+            log(tr('log_no_pages'))
             continue
 
         try:
             os.makedirs(dst_dir, exist_ok=True)
         except OSError as exc:
-            log('        BŁĄD: nie można utworzyć katalogu %s (%s)' % (dst_dir, exc))
+            log(tr('err_mkdir', dir=dst_dir, err=exc))
             bledy += len(zadania)
             continue
 
@@ -565,8 +677,7 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
             dst = sciezka_strony(bazowy, strona, liczba_stron)
 
             if pomijaj_istniejace and os.path.isfile(dst):
-                log('        str. %d -> %s : pominięto (plik istnieje)' % (
-                    strona, os.path.basename(dst)))
+                log(tr('sync_page_skip', page=strona, file=os.path.basename(dst)))
                 pominiete += 1
                 continue
 
@@ -574,20 +685,20 @@ def konwertuj_pdf_do_tiff(katalog_pdf, katalog_tiff=None, dpi=200,
             if ok:
                 udane += 1
                 if rozmiar:
-                    log('        str. %d -> %s : OK (%s px, DPI %d, bezstratnie)' % (
-                        strona, os.path.basename(dst), rozmiar, dpi))
+                    log(tr('sync_page_ok', page=strona,
+                           file=os.path.basename(dst), size=rozmiar))
                 else:
-                    log('        str. %d -> %s : OK (DPI %d, bezstratnie)' % (
-                        strona, os.path.basename(dst), dpi))
+                    log(tr('sync_page_ok_short', page=strona,
+                           file=os.path.basename(dst)))
             else:
                 bledy += 1
-                log('        str. %d -> %s : BŁĄD (kod %d)' % (
-                    strona, os.path.basename(dst), kod))
+                log(tr('sync_page_err', page=strona,
+                       file=os.path.basename(dst), rc=kod))
                 if tekst:
                     for line in tekst.strip().splitlines()[-3:]:
                         log('            %s' % line)
 
-    log('=== KONIEC: udane strony=%d, błędy=%d, pominięte=%d ===' % (udane, bledy, pominiete))
+    log(tr('info_done', ok=udane, fail=bledy, skip=pominiete))
     return {'udane': udane, 'bledy': bledy, 'pominiete': pominiete, 'pliki': len(pliki)}
 
 
@@ -612,60 +723,45 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
         return 'pdf_to_tiff'
 
     def displayName(self):
-        return 'Konwertuj PDF do TIFF (bezstratnie)'
+        return tr('alg_name')
 
     def group(self):
-        return 'Konwersja PDF'
+        return tr('alg_group')
 
     def groupId(self):
         return 'pdf2tiff'
 
     def shortHelpString(self):
-        return (
-            'Konwertuje pliki *.pdf z katalogu do plików *.tif przy pomocy '
-            'gdal_translate (renderowanie w zadanym DPI, kompresja bezstratna DEFLATE).\n\n'
-            'PDF wielostronicowe: każda strona to osobny podzbiór GDAL. Domyślnie '
-            'zapisywane są tylko rysunki (strony większe niż wybrany format - A3 oznacza '
-            '"większe niż A4"), opisówki A4 są pomijane. Można też wybrać wszystkie strony '
-            'albo listę stron, np. 1,3,5-8.\n\n'
-            'Nazwy plików: PDF jednostronicowy -> nazwa.tif, wielostronicowy -> '
-            'nazwa_p01.tif, nazwa_p02.tif, ...\n\n'
-            'Dla PDF rastrowych (np. PZT z CAD) 200 DPI = natywna rozdzielczość (1:1). '
-            'Wyższe DPI to interpolacja - gładsze, ale bez nowego detalu.\n\n'
-            'gdal_translate --config GDAL_PDF_DPI <DPI> -of GTiff '
-            '-co COMPRESS=DEFLATE -co PREDICTOR=2 -co TILED=YES -co BIGTIFF=IF_SAFER '
-            '"wejście.pdf" "wyjście.tif"'
-        )
+        return tr('alg_help')
 
     def createInstance(self):
         return KonwertujPdfDoTiff()
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterFile(
-            self.INPUT_FOLDER, 'Katalog z plikami PDF', behavior=_FILE_FOLDER))
+            self.INPUT_FOLDER, tr('p_input'), behavior=_FILE_FOLDER))
         self.addParameter(QgsProcessingParameterFolderDestination(
-            self.OUTPUT_FOLDER, 'Katalog wynikowy (TIFF)'))
+            self.OUTPUT_FOLDER, tr('p_output')))
         self.addParameter(QgsProcessingParameterNumber(
-            self.DPI, 'DPI renderowania (200 = natywne dla PDF rastrowych)',
+            self.DPI, tr('p_dpi'),
             type=_NUMBER_INTEGER, defaultValue=200, minValue=72, maxValue=2400))
         self.addParameter(QgsProcessingParameterEnum(
-            self.PAGE_MODE, 'Strony PDF', options=ETYKIETY_TRYBOW, defaultValue=0))
+            self.PAGE_MODE, tr('p_page_mode'), options=etykiety_trybow(), defaultValue=0))
         self.addParameter(QgsProcessingParameterString(
-            self.PAGES, 'Wskazane strony (np. 1,3,5-8; puste = wszystkie)',
-            defaultValue='', optional=True))
+            self.PAGES, tr('p_pages'), defaultValue='', optional=True))
         self.addParameter(QgsProcessingParameterEnum(
-            self.MIN_FORMAT, 'Minimalny format rysunku', options=NAZWY_FORMATOW,
+            self.MIN_FORMAT, tr('p_min_format'), options=NAZWY_FORMATOW,
             defaultValue=NAZWY_FORMATOW.index(DOMYSLNY_FORMAT)))
         self.addParameter(QgsProcessingParameterNumber(
-            self.MIN_INK, 'Minimalne pokrycie tuszem %% (0 = bez filtra)',
+            self.MIN_INK, tr('p_min_ink'),
             type=_NUMBER_DOUBLE, defaultValue=DOMYSLNY_TUSZ,
             minValue=0.0, maxValue=90.0))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.SKIP_EXISTING, 'Pomijaj istniejące TIFF', defaultValue=True))
+            self.SKIP_EXISTING, tr('p_skip'), defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.RECURSIVE, 'Przetwarzaj podkatalogi', defaultValue=False))
+            self.RECURSIVE, tr('p_recursive'), defaultValue=False))
         self.addParameter(QgsProcessingParameterFile(
-            self.GDAL_TRANSLATE, 'gdal_translate (puste = wykryj automatycznie)',
+            self.GDAL_TRANSLATE, tr('p_gdal'),
             behavior=_FILE_FILE, optional=True, defaultValue=''))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -673,15 +769,15 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
         if not gdal:
             gdal = detect_gdal_translate()
         if not os.path.isfile(gdal):
-            raise QgsProcessingException('Nie znaleziono gdal_translate: %s' % gdal)
+            raise QgsProcessingException(tr('exc_no_gdal', path=gdal))
 
         in_dir = self.parameterAsString(parameters, self.INPUT_FOLDER, context)
         if not os.path.isdir(in_dir):
-            raise QgsProcessingException('Katalog źródłowy nie istnieje: %s' % in_dir)
+            raise QgsProcessingException(tr('exc_no_in', path=in_dir))
 
         out_dir = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
         if not out_dir:
-            raise QgsProcessingException('Wskaż katalog wynikowy.')
+            raise QgsProcessingException(tr('exc_no_out'))
 
         dpi = self.parameterAsInt(parameters, self.DPI, context)
         skip_existing = self.parameterAsBool(parameters, self.SKIP_EXISTING, context)
@@ -703,26 +799,25 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
 
         pliki = lista_pdf(in_dir, recursive)
         if not pliki:
-            raise QgsProcessingException('W katalogu nie znaleziono plików *.pdf.')
+            raise QgsProcessingException(tr('exc_no_pdf'))
 
-        feedback.pushInfo('gdal_translate : %s' % gdal)
-        feedback.pushInfo('Katalog źródłowy: %s' % in_dir)
-        feedback.pushInfo('Katalog docelowy: %s' % out_dir)
-        feedback.pushInfo('DPI / kompresja : %d / DEFLATE (bezstratna)' % dpi)
-        tryb_etykieta = ETYKIETY_TRYBOW[max(0, min(tryb_index, len(ETYKIETY_TRYBOW) - 1))]
+        feedback.pushInfo(tr('info_gdal', path=gdal))
+        feedback.pushInfo(tr('info_in', path=in_dir))
+        feedback.pushInfo(tr('info_out', path=out_dir))
+        feedback.pushInfo(tr('info_dpi', dpi=int(dpi)))
         if tryb_stron == TRYB_RYSUNKI:
-            feedback.pushInfo('Tryb stron      : %s (min. format %s, min. tusz %.1f%%)'
-                              % (tryb_etykieta, min_format, min_tusz))
+            feedback.pushInfo(tr('mode_line_drawings', mode=opis_trybu(tryb_stron),
+                                 fmt=str(min_format).upper(), ink=float(min_tusz)))
         else:
-            feedback.pushInfo('Tryb stron      : %s' % tryb_etykieta)
-        feedback.pushInfo('Plików do konwersji: %d' % len(pliki))
+            feedback.pushInfo(tr('mode_line', mode=opis_trybu(tryb_stron)))
+        feedback.pushInfo(tr('info_files', count=len(pliki)))
 
         udane = bledy = pominiete = 0
         total = len(pliki)
 
         for index, src in enumerate(pliki):
             if feedback.isCanceled():
-                feedback.pushInfo('Przerwano na żądanie użytkownika.')
+                feedback.pushInfo(tr('info_cancel'))
                 break
 
             feedback.setProgress(int(index * 100.0 / total))
@@ -733,24 +828,23 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
                 liczba_stron, zadania, odrzucone, uwaga = plan_stron_pdf(
                     src, tryb_stron, lista_stron, min_format, min_tusz)
             except (RuntimeError, ValueError, OSError) as exc:
-                feedback.pushInfo('        nie można odczytać stron (%s)' % exc)
+                feedback.pushInfo(tr('err_read_pages', name=os.path.basename(src), err=exc))
                 liczba_stron, zadania, odrzucone, uwaga = 1, [(1, src)], [], []
 
-            feedback.pushInfo('        stron: %d, do konwersji: %d'
-                              % (liczba_stron, len(zadania)))
+            feedback.pushInfo(tr('sync_pages', pages=liczba_stron, todo=len(zadania)))
             if uwaga:
                 feedback.pushInfo('        %s' % uwaga)
             for strona, powod in odrzucone:
-                feedback.pushInfo('        str. %d: pominięta (%s)' % (strona, powod))
+                feedback.pushInfo(tr('log_page_skipped', page=strona, reason=powod))
             if not zadania:
-                feedback.pushInfo('        brak stron do konwersji')
+                feedback.pushInfo(tr('log_no_pages'))
                 continue
 
             try:
                 os.makedirs(dst_dir, exist_ok=True)
             except OSError as exc:
                 bledy += len(zadania)
-                feedback.reportError('Nie można utworzyć katalogu %s (%s)' % (dst_dir, exc),
+                feedback.reportError(tr('info_mkdir', dir=dst_dir, err=exc),
                                      fatalError=False)
                 continue
 
@@ -760,8 +854,8 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
                 dst = sciezka_strony(bazowy, strona, liczba_stron)
 
                 if skip_existing and os.path.isfile(dst):
-                    feedback.pushInfo('        str. %d -> %s : pominięto (plik istnieje)'
-                                      % (strona, os.path.basename(dst)))
+                    feedback.pushInfo(tr('sync_page_skip', page=strona,
+                                         file=os.path.basename(dst)))
                     pominiete += 1
                     continue
 
@@ -769,22 +863,21 @@ class KonwertujPdfDoTiff(QgsProcessingAlgorithm):
                 if ok:
                     udane += 1
                     if rozmiar:
-                        feedback.pushInfo('        str. %d -> %s : OK (%s px, DPI %d)'
-                                          % (strona, os.path.basename(dst), rozmiar, dpi))
+                        feedback.pushInfo(tr('sync_page_ok', page=strona,
+                                             file=os.path.basename(dst), size=rozmiar))
                     else:
-                        feedback.pushInfo('        str. %d -> %s : OK (DPI %d)'
-                                          % (strona, os.path.basename(dst), dpi))
+                        feedback.pushInfo(tr('sync_page_ok_short', page=strona,
+                                             file=os.path.basename(dst)))
                 else:
                     bledy += 1
-                    feedback.pushInfo('        str. %d -> %s : BŁĄD (kod %d)'
-                                      % (strona, os.path.basename(dst), kod))
+                    feedback.pushInfo(tr('sync_page_err', page=strona,
+                                         file=os.path.basename(dst), rc=kod))
                     if tekst:
                         tail = '\n'.join(tekst.strip().splitlines()[-5:])
                         feedback.reportError('gdal_translate: %s' % tail, fatalError=False)
 
         feedback.setProgress(100)
-        feedback.pushInfo('=== KONIEC: udane strony=%d, błędy=%d, pominięte=%d ==='
-                          % (udane, bledy, pominiete))
+        feedback.pushInfo(tr('info_done', ok=udane, fail=bledy, skip=pominiete))
         return {self.OUTPUT_FOLDER: out_dir}
 
 
